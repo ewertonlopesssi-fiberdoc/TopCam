@@ -4,12 +4,12 @@
 #   O endereço com o segredo vem da variável MTX_AUTHHTTPADDRESS (compose.yaml).
 # - API de controle (9997), métricas (9998), RTSP (8554) e HLS (8888) ficam só
 #   na rede interna dos contêineres. Só a porta RTMP é publicada.
-# - Os caminhos de cada câmera são criados pelo worker via API, a partir do banco:
-#     live/<chave>  → entrada (a câmera publica aqui; nunca grava)
-#     cam/<id>      → relay interno de live/<chave> (sem transcodificar), usado
-#                     para gravação (Fase 4) e visualização (Fase 3)
-# - "all_others" existe apenas para que publicações com chave desconhecida
-#   cheguem à API e sejam registradas como recusadas.
+# - Caminhos:
+#     live/<chave>  → entrada: a câmera publica aqui; usa "all_others" com os
+#                     padrões abaixo (nunca grava). A API decide quem publica.
+#     cam/<id>      → relay interno de live/<chave> (sem transcodificar), criado
+#                     pelo worker via API a partir do banco; usado para gravação
+#                     (Fase 4) e visualização (Fase 3).
 # - Gravação desligada por padrão; só é ligada, câmera a câmera, pelo worker.
 
 logLevel: info

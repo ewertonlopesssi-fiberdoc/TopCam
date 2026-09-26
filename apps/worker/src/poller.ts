@@ -66,8 +66,7 @@ export async function pollOnce(ctx: WorkerContext, state: PollerState): Promise<
   for (const cam of cameras) {
     const name = cameraMediaPath(cam, ctx.encKey);
     if (!name) continue;
-    if (confNames && (!confNames.has(name) || !confNames.has(cameraPathName(cam.id))))
-      missingPathConfs = true;
+    if (confNames && !confNames.has(cameraPathName(cam.id))) missingPathConfs = true;
     const p = byName.get(name);
     const live = Boolean(p?.ready && p.online !== false && p.source);
 

@@ -234,15 +234,14 @@ describe("validação (probe)", () => {
 });
 
 describe("reconciliação do servidor de mídia", () => {
-  it("cria entrada live/<chave> e relay cam/<id> por câmera, sem gravação na Fase 1", async () => {
+  it("cria só o relay cam/<id> por câmera (entrada live/ usa os padrões), sem gravação na Fase 1", async () => {
     const r = await reconcileMediaServer(ctx);
-    expect(r.added).toBe(12);
+    expect(r.added).toBe(6);
     expect(r.recording).toBe(0);
     const live = [...mtx.confs.values()].filter((c) => c.name.startsWith("live/"));
     const cams = [...mtx.confs.values()].filter((c) => c.name.startsWith("cam/"));
-    expect(live).toHaveLength(6);
+    expect(live).toHaveLength(0);
     expect(cams).toHaveLength(6);
-    expect(live.every((c) => c.record === false && c.overridePublisher === false)).toBe(true);
     expect(cams.every((c) => c.record === false && c.sourceOnDemand === true)).toBe(true);
     const cam1 = await cam("CAM-001");
     const relay = mtx.confs.get(`cam/${cam1.id}`)!;

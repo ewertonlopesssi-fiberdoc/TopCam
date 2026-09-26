@@ -201,8 +201,12 @@ T9=$(sql "SELECT now()")
 NEWKEY=$(dc exec -T api node apps/api/dist/cli.js camera:rotate-key --tenant "$TENANT" --code CAM-004 --raw 2>/dev/null | tr -d '\r\n')
 kicked() { [ "$(events_since publisher_kicked "$T9")" -ge 1 ]; }
 secs_kick=$(wait_for 30 kicked); rc_kick=$?
+OLDKEY=${KEY[CAM-004]}
+# Nova tentativa explícita com a chave antiga: deve ser recusada.
+dc --profile test run --rm test-transmitter once "$OLDKEY" 5 >/dev/null 2>&1; rc_oldtx=$?
 old_rejected() { [ "$(events_since auth_rejected "$T9" "AND data->>'reason' = 'unknown_key'")" -ge 1 ]; }
-secs_rej=$(wait_for 30 old_rejected); rc_rej=$?
+secs_rej=$(wait_for 10 old_rejected); rc_rej=$?
+[ "$rc_oldtx" -ne 0 ] || rc_rej=1
 not_live() { ! status_is CAM-004 ao_vivo; }
 wait_for 20 not_live >/dev/null; rc_off=$?
 st_between=$(cam_status CAM-004)
@@ -213,7 +217,7 @@ secs_new=$(wait_for 25 new_live); rc_new=$?
 CAM4_ID_AFTER=$(sql "SELECT id FROM cameras WHERE id = $(cam_sql CAM-004)")
 KEY[CAM-004]=$NEWKEY
 if [ ${#NEWKEY} -eq 40 ] && [ $rc_kick -eq 0 ] && [ $rc_rej -eq 0 ] && [ $rc_off -eq 0 ] && [ $rc_new -eq 0 ] && [ "$CAM4_ID" = "$CAM4_ID_AFTER" ]; then
-  record 9 PASS "Rotação: chave antiga recusada, nova aceita, mesmo ID da câmera" "publicador antigo desconectado em ${secs_kick}s; reconexão com a chave antiga recusada (${secs_rej}s); estado entre as chaves: '$st_between'; chave nova ao vivo em ${secs_new}s; ID ${CAM4_ID:0:8} mantido"
+  record 9 PASS "Rotação: chave antiga recusada, nova aceita, mesmo ID da câmera" "publicador antigo desconectado em ${secs_kick}s; nova tentativa com a chave antiga recusada (ffmpeg código $rc_oldtx, evento auth_rejected); estado entre as chaves: '$st_between'; chave nova ao vivo em ${secs_new}s; ID ${CAM4_ID:0:8} mantido"
 else
   record 9 FAIL "Rotação: chave antiga recusada, nova aceita, mesmo ID da câmera" "kick rc=$rc_kick rejeição rc=$rc_rej offline rc=$rc_off ($st_between) nova rc=$rc_new id ${CAM4_ID:0:8}/${CAM4_ID_AFTER:0:8}"
 fi

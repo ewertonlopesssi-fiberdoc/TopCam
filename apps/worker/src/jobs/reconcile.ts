@@ -18,17 +18,17 @@ import type { WorkerContext } from "../context.js";
 /**
  * Reconciliação do servidor de mídia com o banco (fonte da verdade).
  *
- * Para cada câmera ativa existem dois caminhos:
- *   live/<chave>  entrada: a câmera publica aqui; nunca grava; segunda
- *                 publicação é recusada (overridePublisher: false).
- *   cam/<id>      relay interno que lê live/<chave> por RTSP local, sem
- *                 transcodificar. Grava somente quando a câmera tem gravação
- *                 habilitada, a gravação global está ligada e o armazenamento
- *                 não está bloqueado. Sem gravação, só é ativado sob demanda
- *                 (quando alguém assiste — Fase 3), então não consome nada.
+ *  - live/<chave>: entrada da câmera. NÃO recebe configuração própria — usa
+ *    os padrões do mediamtx.yml (publisher, sem gravação, sem sobrescrever
+ *    publicador). Assim, reconfigurar o servidor nunca derruba uma câmera
+ *    transmitindo. Quem pode publicar é decidido pela API a cada conexão.
+ *  - cam/<id>: relay interno que lê live/<chave> por RTSP local, sem
+ *    transcodificar. Grava somente quando a câmera tem gravação habilitada, a
+ *    gravação global está ligada e o armazenamento não está bloqueado. Sem
+ *    gravação, só é ativado sob demanda (quando alguém assiste — Fase 3).
  *
- * Também remove caminhos de chaves que deixaram de valer (rotação, câmera
- * desabilitada, cliente suspenso) e desconecta quem ainda publica neles.
+ * Também desconecta quem ainda publica com chave que deixou de valer (rotação,
+ * câmera desabilitada, cliente suspenso) e remove configurações que sobraram.
  */
 
 export interface DesiredPath {
@@ -76,18 +76,14 @@ export async function reconcileMediaServer(ctx: WorkerContext): Promise<Reconcil
   );
 
   const desired: DesiredPath[] = [];
+  const validLive = new Set<string>();
   let recording = 0;
   for (const cam of cameras) {
     if (!cam.stream_key_enc) continue;
     const livePath = mediaPathForKey(decryptStreamKey(cam.stream_key_enc, ctx.encKey));
     const record = cam.recording_enabled && globalRecording && cam.storage_blocked !== true;
     if (record) recording++;
-    desired.push({
-      name: livePath,
-      cameraId: cam.id,
-      code: cam.code,
-      conf: { source: "publisher", overridePublisher: false, record: false },
-    });
+    validLive.add(livePath);
     desired.push({
       name: cameraPathName(cam.id),
       cameraId: cam.id,
@@ -101,12 +97,10 @@ export async function reconcileMediaServer(ctx: WorkerContext): Promise<Reconcil
     });
   }
 
-  // Desconecta primeiro quem publica com chave que deixou de valer (antes de
-  // remover o caminho, para que o evento registre a conexão).
-  const valid = new Set(desired.filter((d) => d.name.startsWith(LIVE_PREFIX)).map((d) => d.name));
+  // Desconecta quem publica com chave que deixou de valer.
   let kicked = 0;
   for (const pub of await ctx.mediamtx.listPublishers()) {
-    if (!pub.path.startsWith(LIVE_PREFIX) || valid.has(pub.path)) continue;
+    if (!pub.path.startsWith(LIVE_PREFIX) || validLive.has(pub.path)) continue;
     try {
       await ctx.mediamtx.kick(pub.kind, pub.id);
       kicked++;
@@ -129,7 +123,7 @@ export async function reconcileMediaServer(ctx: WorkerContext): Promise<Reconcil
 
   const existing = await ctx.mediamtx.listPathConfs();
   const { add, patch, remove } = diffPathConfs(desired, existing);
-  // Remove antes de adicionar: após rotação, o relay aponta para a chave nova.
+  // Remove sobras (ex.: configurações live/<chave> de versões anteriores) antes de adicionar.
   for (const name of remove) await ctx.mediamtx.deletePathConf(name);
   for (const d of add) await ctx.mediamtx.addPathConf(d.name, d.conf);
   for (const d of patch) await ctx.mediamtx.patchPathConf(d.name, d.conf);
