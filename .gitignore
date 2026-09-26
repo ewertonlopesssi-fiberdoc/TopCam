@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.data/
+reports/*.md
+reports/*.log
+!reports/.gitkeep
+coverage/
+dump.rdb

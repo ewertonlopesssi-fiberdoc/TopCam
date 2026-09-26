@@ -1,0 +1,72 @@
+# TopCam — configuração do MediaMTX (servidor de mídia).
+#
+# - Toda publicação e leitura é autorizada pela API (authMethod: http).
+#   O endereço com o segredo vem da variável MTX_AUTHHTTPADDRESS (compose.yaml).
+# - API de controle (9997), métricas (9998), RTSP (8554) e HLS (8888) ficam só
+#   na rede interna dos contêineres. Só a porta RTMP é publicada.
+# - Os caminhos de cada câmera são criados pelo worker via API, a partir do banco:
+#     live/<chave>  → entrada (a câmera publica aqui; nunca grava)
+#     cam/<id>      → relay interno de live/<chave> (sem transcodificar), usado
+#                     para gravação (Fase 4) e visualização (Fase 3)
+# - "all_others" existe apenas para que publicações com chave desconhecida
+#   cheguem à API e sejam registradas como recusadas.
+# - Gravação desligada por padrão; só é ligada, câmera a câmera, pelo worker.
+
+logLevel: info
+logDestinations: [stdout]
+readTimeout: 10s
+writeTimeout: 10s
+
+authMethod: http
+authHTTPAddress: http://api:3000/internal/mediamtx/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+api: true
+apiAddress: :9997
+metrics: true
+metricsAddress: :9998
+pprof: false
+
+# Reprodução de gravações: Fase 5.
+playback: false
+
+# RTSP somente interno (validação do stream pelo worker).
+rtsp: true
+rtspTransports: [tcp]
+rtspAddress: :8554
+
+# Entrada das câmeras. RTMPS (1936) será habilitado na Fase 8 com o certificado do domínio.
+rtmp: true
+rtmpEncryption: "no"
+rtmpAddress: :1935
+
+# HLS interno; acesso público via gateway com token temporário na Fase 3.
+hls: true
+hlsAddress: :8888
+hlsAllowOrigins: []
+
+# WebRTC: Fase 3.
+webrtc: false
+srt: false
+moq: false
+
+pathDefaults:
+  source: publisher
+  # Segunda publicação na mesma chave é recusada (a API também registra o evento).
+  overridePublisher: false
+  record: false
+  # Só caminhos cam/<id da câmera> gravam: o diretório nunca contém a chave.
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordSegmentDuration: 60s
+  # Retenção é controlada pelo worker a partir do índice no PostgreSQL (Fase 4).
+  recordDeleteAfter: 0s
+  runOnOnline: /bin/sh /hooks/notify.sh online
+  runOnOffline: /bin/sh /hooks/notify.sh offline
+
+paths:
+  all_others:

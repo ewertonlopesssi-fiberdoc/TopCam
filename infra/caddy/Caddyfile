@@ -1,0 +1,29 @@
+# TopCam — gateway HTTP(S).
+# Fase 1: HTTP na porta 80 (laboratório). HTTPS automático com o domínio
+# definitivo (PUBLIC_HOST) entra na Fase 8.
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	encode zstd gzip
+	header -Server
+
+	# Rotas internas e de saúde nunca são expostas.
+	@internal path /internal/* /ready /health
+	respond @internal 404
+
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+
+	handle {
+		respond "TopCam — o painel será publicado a partir da Fase 2." 200
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

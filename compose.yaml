@@ -1,0 +1,213 @@
+# TopCam — Docker Compose (laboratório: uma VM Debian).
+# Uso:  cp .env.example .env  (ou scripts/generate-env.sh)  →  docker compose up -d --build
+# Serviços isolados por responsabilidade para permitir a migração para o servidor
+# dedicado mudando apenas variáveis de ambiente, volumes e escala.
+
+name: topcam
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app: &app
+  build:
+    context: .
+    target: runtime
+    args:
+      NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+  image: topcam/app:${TOPCAM_VERSION:-0.1.0}
+  restart: unless-stopped
+  logging: *logging
+  environment: &app-env
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    DATABASE_URL: postgres://topcam_app:${APP_DB_PASSWORD:?defina APP_DB_PASSWORD}@postgres:5432/topcam
+    REDIS_URL: redis://redis:6379/0
+    MEDIAMTX_API_URL: http://mediamtx:9997
+    MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
+    MEDIA_HOOK_SECRET: ${MEDIA_HOOK_SECRET:?defina MEDIA_HOOK_SECRET}
+    MEDIA_READ_USER: topcam-internal
+    MEDIA_READ_PASSWORD: ${MEDIA_READ_PASSWORD:?defina MEDIA_READ_PASSWORD}
+    STREAM_KEY_ENC_KEY: ${STREAM_KEY_ENC_KEY:?defina STREAM_KEY_ENC_KEY}
+    PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+    RTMP_PUBLIC_PORT: ${RTMP_PUBLIC_PORT:-1935}
+    RECORDINGS_PATH: /recordings
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: topcam
+      POSTGRES_USER: topcam_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U topcam_owner -d topcam"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *logging
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "noeviction",
+      ]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Aplica migrations e o seed idempotente; termina em seguida.
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["node", "packages/db/dist/cli.js", "setup"]
+    environment:
+      MIGRATION_DATABASE_URL: postgres://topcam_owner:${POSTGRES_PASSWORD}@postgres:5432/topcam
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      STREAM_KEY_ENC_KEY: ${STREAM_KEY_ENC_KEY}
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      RECORDINGS_PATH: /recordings
+      VIDEO_QUOTA_BYTES: ${VIDEO_QUOTA_BYTES:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      SEED_DEMO: ${SEED_DEMO:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["node", "apps/api/dist/server.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    <<: *app
+    command: ["node", "apps/worker/dist/main.js"]
+    environment:
+      <<: *app-env
+      POLL_INTERVAL_S: ${POLL_INTERVAL_S:-5}
+      OFFLINE_AFTER_S: ${OFFLINE_AFTER_S:-10}
+    volumes:
+      - ${RECORDINGS_DIR:-./.data/recordings}:/recordings
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # O worker grava um heartbeat a cada ciclo do poller.
+      test: ["CMD-SHELL", "test $$(( $$(date +%s) - $$(stat -c %Y /tmp/worker-heartbeat) )) -lt 60"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.1-ffmpeg
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      MTX_AUTHHTTPADDRESS: http://api:3000/internal/mediamtx/auth?secret=${MEDIA_HOOK_SECRET}
+      MEDIA_HOOK_SECRET: ${MEDIA_HOOK_SECRET}
+      TOPCAM_API_URL: http://api:3000
+    volumes:
+      - ./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - ./infra/mediamtx/hooks:/hooks:ro
+      - ${RECORDINGS_DIR:-./.data/recordings}:/recordings
+    ports:
+      - "${RTMP_BIND:-0.0.0.0}:${RTMP_PUBLIC_PORT:-1935}:1935"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9997/v3/paths/list"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    logging: *logging
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ------------------------------------------------------------ perfil "test"
+  # Transmissor RTMP de teste (simula câmeras). Ex.:
+  #   docker compose --profile test run -d --rm test-transmitter publish <CHAVE> CAM-001
+  test-transmitter:
+    image: bluenviron/mediamtx:1.21.1-ffmpeg
+    profiles: ["test"]
+    init: true
+    entrypoint: ["/bin/sh", "/tools/transmit.sh"]
+    environment:
+      TX_URL: ${TX_URL:-rtmp://mediamtx:1935/live}
+      TX_SIZE: ${TX_SIZE:-640x360}
+      TX_FPS: ${TX_FPS:-15}
+      TX_BITRATE: ${TX_BITRATE:-800k}
+    volumes:
+      - ./tools/test-transmitter:/tools:ro
+    logging: *logging
+
+  # Testes automatizados (unitários + integração) contra o Postgres/Redis do Compose.
+  tests:
+    build:
+      context: .
+      target: test
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+    image: topcam/tests:${TOPCAM_VERSION:-0.1.0}
+    profiles: ["test"]
+    environment:
+      TEST_ADMIN_DATABASE_URL: postgres://topcam_owner:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      TEST_REDIS_URL: redis://redis:6379/15
+      # Mesma senha do ambiente: os testes recriam bancos temporários, mas o papel topcam_app é do cluster.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:

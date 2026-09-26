@@ -1,0 +1,19 @@
+{
+  "name": "@topcam/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@topcam/db": "workspace:*",
+    "@topcam/shared": "workspace:*",
+    "fastify": "^5.12.5",
+    "ioredis": "^5.8.0",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  }
+}
