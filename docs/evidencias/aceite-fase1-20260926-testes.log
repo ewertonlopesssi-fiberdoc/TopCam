@@ -1,0 +1,32 @@
+ Container topcam-redis-1 Running 
+ Container topcam-postgres-1 Running 
+ Container topcam-postgres-1 Waiting 
+ Container topcam-redis-1 Waiting 
+ Container topcam-redis-1 Healthy 
+ Container topcam-postgres-1 Healthy 
+ Container topcam-tests-run-0235d244938b Creating 
+ Container topcam-tests-run-0235d244938b Created 
+
+> topcam@0.1.0 lint /app
+> eslint .
+
+
+> topcam@0.1.0 test /app
+> vitest run
+
+
+ RUN  v5.0.2 /app
+
+ ✓ |unit| packages/shared/test/shared.unit.test.ts (14 tests) 102ms
+ ✓ |unit| apps/worker/test/worker.unit.test.ts (5 tests) 6ms
+ ✓ |integration| apps/worker/test/worker.int.test.ts (12 tests) 2673ms
+   ✓ poller de status (5)
+     ✓ recupera câmera transmitindo, detecta vídeo parado e queda 1403ms
+ ✓ |integration| apps/api/test/api.int.test.ts (13 tests) 1185ms
+ ✓ |integration| packages/db/test/db.int.test.ts (11 tests) 903ms
+
+ Test Files  5 passed (5)
+      Tests  55 passed (55)
+   Start at  15:13:17
+   Duration  6.77s (tests 82%, import 10%, transform 8%, worker 1%)
+

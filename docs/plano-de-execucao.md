@@ -1,7 +1,7 @@
 # TopCam — Plano de execução e Fase 1
 
 > Versão 1.1 · 26/09/2026 · Nome do sistema e do repositório: **TopCam** (antes VigiaTop) · Base: `especificacao-tecnica.md` + `instrucoes-do-projeto.md` + imagem de referência (6 telas).
-> Status: **aguardando aprovação** — nenhuma linha de código foi escrita ainda.
+> Status: plano aprovado em 26/09/2026. **Fase 1 concluída** (aceite 11/11). Veja `fase-1-relatorio.md`. Próxima: Fase 2.
 
 ---
 
@@ -157,7 +157,7 @@ As versões serão fixadas no lockfile e nas tags de imagem ao implementar a Fas
 | D7 | **Canais de alerta** | Não especificados | Alertas no painel + e-mail. Telegram/WhatsApp opcionais | Fase 7 |
 | D8 | **Imagem × especificação** | As imagens mostram câmeras **RTSP** e "tipo de gravação: Movimento/Evento". A especificação prevê só RTMP push e gravação contínua | Modelo já preparado (`rtsp_pull`, `motion`, `event`), mas só RTMP + contínua implementados. Detecção de movimento exige decodificação (CPU), o que contraria "sem transcodificação". Só incluo se você aprovar como escopo novo. O botão **"Importar"** da tela Câmeras também contraria a especificação ("não incluir cadastro em massa na primeira versão"): na primeira versão ele fica fora, só com a opção "Exportar" | — |
 | D9 | **Limites dos planos** | Nomes aparecem nas imagens, valores não | Valores padrão editáveis no painel | Fase 2 |
-| D10 | **Repositório** | Onde versionar | Repositório **privado** no GitHub (`topcam`) na sua conta. Me diga qual conta usar | Fase 1 (entrega) |
+| D10 | **Repositório** | ✅ **Decidido:** repositório privado **TopCam** na conta `ewertonlopesssi-fiberdoc` | O push é feito pelo Ewe (sem acesso à conta a partir daqui) | — |
 | D11 | **Meu ambiente de teste** | Aqui na nuvem tenho Docker, Node 22, ffmpeg e psql, mas o Docker Hub está limitando downloads (erro 429) e o GitHub Releases está bloqueado | Rodo aqui tudo o que for possível. O teste completo com `docker compose` na sua VM terá um script de aceite que gera o relatório. Se a imagem não puder ser baixada aqui, digo exatamente o que não foi testado | — |
 
 ---
@@ -168,7 +168,7 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
 
 | Fase | Entrega | Critérios objetivos de aprovação (resumo) |
 |---|---|---|
-| **1. Fundação + ingestão RTMP autenticada** | Monorepo, Compose, modelo de dados completo + RLS, seed, API de health e hooks, transmissor de teste | Ver seção 7 |
+| **1. Fundação + ingestão RTMP autenticada** ✅ | Monorepo, Compose, modelo de dados completo + RLS, seed, API de health e hooks, transmissor de teste | Ver seção 7. **Concluída: 11/11** |
 | **2. Autenticação, multiempresa e cadastros + base visual** | Login (JWT + refresh), papéis, permissões por câmera, auditoria. Telas Clientes, Usuários, Grupos/Locais, Câmeras (cadastro individual, gerar/rotacionar/exibir chave), Configurações, com layout da referência (menu lateral, cabeçalho, cores) responsivo | Dois clientes fictícios isolados; viewer só vê câmeras permitidas; toda alteração aparece na auditoria; telas conferidas em 1440 px, 768 px e 390 px |
 | **3. Ao vivo** | Gateway com token assinado, HLS (+ WebRTC/WHEP), tela Ao Vivo com mosaico 1/4/9/16, árvore Empresa › Local › Grupo, tela cheia | 5 câmeras simuladas ao vivo; token expirado/de outro usuário = 403; chave nunca aparece no navegador; latência medida e registrada; **validação da TWG 6608 (D1)** |
 | **4. Gravação e retenção** | Gravação só da CAM-001, verificação e indexação de segmentos, estado "gravando", lacunas, retenção de 24 h, reconciliador | CAM-001 com segmentos contínuos; CAM-002..005 com **zero** arquivos e zero registros; expurgo comprovado (retenção reduzida no teste + execução de 24 h real); queda gera lacuna e evento |
