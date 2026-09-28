@@ -1,6 +1,6 @@
 # TopCam — Relatório da Fase 2 (autenticação, multiempresa, cadastros e base visual)
 
-28/09/2026 · **aceite: 12/12 critérios aprovados** e **E2E 10/10** (computador 1440 px, tablet 768 px e celular 390 px) no ambiente de desenvolvimento. **Falta validar na VM de laboratório** (procedimento no fim).
+28/09/2026 · **aceite: 12/12 critérios aprovados** e **E2E 10/10** (computador 1440 px, tablet 768 px e celular 390 px) no ambiente de desenvolvimento e **12/12 na VM de laboratório no Proxmox (28/09/2026, commit `998550f`)**.
 
 ## O que foi entregue
 
@@ -64,13 +64,16 @@ Evidências completas:
 
 | Item | Situação | Como validar |
 |---|---|---|
-| VM Debian no Proxmox | Não executado (sem acesso daqui) | Procedimento abaixo: `scripts/accept-phase2.sh` na VM deve dar 12/12 |
+| VM Debian no Proxmox | ✅ **12/12 em 28/09/2026** (73/73 testes; câmera ao vivo em 4 s). A 1ª execução deu 11/12: o `gateway` não foi recriado pelo `up --build` e seguia com o Caddyfile da Fase 1. Resolvido com `docker compose up -d --force-recreate gateway` (ver pendências) | — |
 | Painel no navegador de vocês | Conferido só no Chromium do ambiente de testes | Abrir `http://172.31.141.20` no computador, tablet e celular e percorrer as telas |
 | E2E contra a VM | Não executado | README, seção "Testes do painel (E2E)" |
 | Cookie `Secure` | Desligado de propósito (laboratório em HTTP) | Liga com `COOKIE_SECURE=true` quando houver HTTPS (Fase 8) |
 | Aplicativo mobile | A API já aceita `client: "mobile"` (refresh no corpo), mas não há app | Fase 9 |
 
 ## Pendências e observações
+
+- **Atualização não recria o gateway:** arquivos de configuração montados (`Caddyfile`, `mediamtx.yml`) não fazem o Compose recriar o contêiner, e o `git pull` troca o arquivo. Até a correção permanente (proposta: pasta montada + `caddy --watch` e `scripts/update.sh`), rodar `docker compose up -d --force-recreate gateway mediamtx` depois de cada atualização.
+- **Falha latente da Fase 1 corrigida:** no Caddyfile da Fase 1, `respond @internal 404` rodava depois dos blocos `handle` (ordem de diretivas do Caddy), então `/internal/*` devolvia o texto provisório com 200. Nada interno era exposto (esse caminho não chegava à API). A configuração da Fase 2 bloqueia corretamente (404).
 
 - **Clientes do aceite:** cada execução do `accept-phase2.sh` deixa dois clientes "Aceite F2 …" com status **Cancelado**, sem câmeras. O usuário de aceite fica desativado. É proposital, para manter a trilha de auditoria.
 - **Rate limit por IP:** 20 erros em 15 min no mesmo IP bloqueiam novas tentativas desse IP. Atrás de um NAT, vários usuários dividem o limite. Se isso incomodar, dá para ajustar `LOGIN_MAX_ATTEMPTS`.

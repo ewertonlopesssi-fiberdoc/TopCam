@@ -1,7 +1,7 @@
 # TopCam — Plano de execução e Fase 1
 
 > Versão 1.1 · 26/09/2026 · Nome do sistema e do repositório: **TopCam** (antes VigiaTop) · Base: `especificacao-tecnica.md` + `instrucoes-do-projeto.md` + imagem de referência (6 telas).
-> Status: plano aprovado em 26/09/2026. **Fase 1 concluída** (aceite 11/11 na VM). **Fase 2 entregue** (aceite 12/12 e E2E 10/10 no ambiente de desenvolvimento; aguardando validação na VM e aprovação). Veja `fase-1-relatorio.md` e `fase-2-relatorio.md`. Próxima: Fase 3.
+> Status: plano aprovado em 26/09/2026. **Fase 1 concluída** (aceite 11/11 na VM). **Fase 2 concluída** (aceite 12/12 na VM; E2E 10/10). Veja `fase-1-relatorio.md` e `fase-2-relatorio.md`. Próxima: Fase 3.
 
 ---
 
@@ -169,7 +169,7 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
 | Fase | Entrega | Critérios objetivos de aprovação (resumo) |
 |---|---|---|
 | **1. Fundação + ingestão RTMP autenticada** ✅ | Monorepo, Compose, modelo de dados completo + RLS, seed, API de health e hooks, transmissor de teste | Ver seção 7. **Concluída: 11/11** |
-| **2. Autenticação, multiempresa e cadastros + base visual** 🟡 | Login (JWT + refresh), papéis, permissões por câmera, auditoria. Telas Clientes, Usuários, Grupos/Locais, Câmeras (cadastro individual, gerar/rotacionar/exibir chave), Configurações, com layout da referência (menu lateral, cabeçalho, cores) responsivo | Dois clientes fictícios isolados; viewer só vê câmeras permitidas; toda alteração aparece na auditoria; telas conferidas em 1440 px, 768 px e 390 px. **Entregue: aceite 12/12 + E2E; falta validar na VM** |
+| **2. Autenticação, multiempresa e cadastros + base visual** ✅ | Login (JWT + refresh), papéis, permissões por câmera, auditoria. Telas Clientes, Usuários, Grupos/Locais, Câmeras (cadastro individual, gerar/rotacionar/exibir chave), Configurações, com layout da referência (menu lateral, cabeçalho, cores) responsivo | Dois clientes fictícios isolados; viewer só vê câmeras permitidas; toda alteração aparece na auditoria; telas conferidas em 1440 px, 768 px e 390 px. **Concluída: 12/12 na VM + E2E** |
 | **3. Ao vivo** | Gateway com token assinado, HLS (+ WebRTC/WHEP), tela Ao Vivo com mosaico 1/4/9/16, árvore Empresa › Local › Grupo, tela cheia | 5 câmeras simuladas ao vivo; token expirado/de outro usuário = 403; chave nunca aparece no navegador; latência medida e registrada; **validação da TWG 6608 (D1)** |
 | **4. Gravação e retenção** | Gravação só da CAM-001, verificação e indexação de segmentos, estado "gravando", lacunas, retenção de 24 h, reconciliador | CAM-001 com segmentos contínuos; CAM-002..005 com **zero** arquivos e zero registros; expurgo comprovado (retenção reduzida no teste + execução de 24 h real); queda gera lacuna e evento |
 | **5. Gravações: reprodução e linha do tempo** | Tela Gravações: calendário, timeline com lacunas, player, velocidade, exportação MP4 autorizada e auditada | Reproduzir trecho escolhido; exportar MP4 válido (ffprobe); usuário sem `pode_exportar` = 403; exportação na auditoria |
