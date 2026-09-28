@@ -1,6 +1,6 @@
 # TopCam — Relatório da Fase 1 (fundação e ingestão RTMP autenticada)
 
-26/09/2026 · commits `526a691` e `ab46d13` · **aceite: 11/11 critérios aprovados**, com o ambiente Docker Compose real e 5 transmissores RTMP de teste.
+26/09/2026 · commits `526a691` e `ab46d13` · **aceite: 11/11 critérios aprovados** no ambiente de desenvolvimento e **11/11 na VM de laboratório no Proxmox (28/09/2026)**, com 5 transmissores RTMP de teste.
 
 ## O que foi entregue
 
@@ -62,8 +62,9 @@ Evidência completa: `docs/evidencias/aceite-fase1-20260926.md` e o log dos test
 
 | Item | Situação | Como validar |
 |---|---|---|
-| VM Debian real no Proxmox | Testado em Linux 6.18 / Docker 29.4 no ambiente em nuvem | Na VM: `scripts/accept-phase1.sh`. O relatório sai em `reports/` |
-| `prepare-vm.sh`: instalação do Docker e firewall | Não executados aqui | Rodar na VM nova. Conferir com `docker compose version` e `nft list ruleset` |
+| VM Debian real no Proxmox | ✅ **Validado em 28/09/2026** na VM TopCam (Debian 12, 4 vCPU, 8 GB, discos de 25 + 35 GB): **11/11 critérios aprovados**, 55/55 testes | — |
+| `prepare-vm.sh`: instalação do Docker | ✅ Executado na VM real (Debian 12) | — |
+| `prepare-vm.sh`: firewall (`--firewall`) | Não executado | Rodar com `--firewall --admin-cidr <rede>` e conferir com `nft list ruleset` |
 | `prepare-vm.sh`: disco de vídeo | ✅ Testado com disco virtual (loop) em Debian 13: disco vazio, já formatado, já montado, disco com dados (recusa) e `--force-format` | — |
 | Câmera TWG 6608 | Sem acesso ao equipamento | `docs/procedimento-teste-twg6608.md` |
 | Resolução e bitrate reais | O aceite usou 640x360, 15 fps, 800 kbps, por limite de CPU do ambiente de teste | Na VM: `TX_SIZE=1920x1080 TX_FPS=25 TX_BITRATE=2M scripts/accept-phase1.sh --no-build` |
