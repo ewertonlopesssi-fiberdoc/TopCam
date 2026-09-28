@@ -84,6 +84,8 @@ fi
 # ------------------------------------------------------------------ 3. disco de vídeo
 if [ -n "$VIDEO_DISK" ]; then
   [ -b "$VIDEO_DISK" ] || die "$VIDEO_DISK não é um dispositivo de bloco"
+  # Aceita caminhos estáveis (/dev/disk/by-id/...) e resolve para o dispositivo real.
+  VIDEO_DISK=$(readlink -f "$VIDEO_DISK")
   case "$(lsblk -dno TYPE "$VIDEO_DISK")" in
     disk|loop) ;;  # loop só é usado nos testes do script
     *) die "$VIDEO_DISK não é um disco inteiro" ;;

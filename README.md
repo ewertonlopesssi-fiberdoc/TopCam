@@ -52,8 +52,8 @@ Navegador ──HTTP :80──► gateway (Caddy) ──/api/*──► api
    ```bash
    git clone https://github.com/ewertonlopesssi-fiberdoc/TopCam.git /opt/topcam
    cd /opt/topcam
-   lsblk                                   # confirme o nome do disco de 35 GB (ex.: /dev/sdb)
-   ./infra/vm/prepare-vm.sh --video-disk /dev/sdb
+   lsblk   # o nome (sda/sdb) pode mudar entre reinícios: confira pelo TAMANHO (35G) ou use /dev/disk/by-id/*drive-scsi1
+   ./infra/vm/prepare-vm.sh --video-disk /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
    # opcional: --firewall --admin-cidr 192.168.10.0/24  (SSH só da rede de administração)
    ```
    O script **recusa** formatar um disco que já tenha dados. Para isso, use `--force-format`.
