@@ -13,6 +13,8 @@ CREATE INDEX users_tenant_idx ON users (tenant_id);
 CREATE INDEX cameras_group_idx ON cameras (group_id);
 
 -- Rotação de refresh token com detecção de reuso: o hash anterior fica guardado;
--- se um token já rotacionado for apresentado de novo, a sessão é revogada.
+-- se um token já rotacionado for apresentado de novo depois da janela de tolerância
+-- (ex.: página recarregada no meio de uma renovação), a sessão é revogada.
 ALTER TABLE sessions ADD COLUMN previous_refresh_hash text;
+ALTER TABLE sessions ADD COLUMN rotated_at timestamptz;
 CREATE INDEX sessions_previous_hash_idx ON sessions (previous_refresh_hash) WHERE previous_refresh_hash IS NOT NULL;

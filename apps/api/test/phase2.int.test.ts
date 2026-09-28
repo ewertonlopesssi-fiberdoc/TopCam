@@ -120,6 +120,9 @@ describe("autenticação", () => {
     for (let i = 0; i < 5; i++)
       expect((await login("alvo@test.local", "x")).res.statusCode).toBe(401);
     expect((await login("alvo@test.local", "x")).res.statusCode).toBe(429);
+    expect((await login("alvo@test.local", "x")).res.statusCode).toBe(429);
+    // O bloqueio vai para a auditoria uma única vez por janela.
+    expect((await auditActions()).filter((a) => a === "auth.login_rate_limited")).toHaveLength(1);
   });
 
   it("primeiro acesso exige troca de senha antes de usar a API", async () => {
@@ -156,7 +159,7 @@ describe("autenticação", () => {
     expect((await api("abc.def.ghi").get("/api/v1/tenants")).statusCode).toBe(401);
   });
 
-  it("refresh rotaciona o token e detecta reuso", async () => {
+  it("refresh rotaciona o token; reuso dentro da tolerância é aceito, fora dela encerra a sessão", async () => {
     const { cookie } = await login(ADMIN.email, NEW_ADMIN_PW);
     const r1 = await app.inject({
       method: "POST",
@@ -164,20 +167,28 @@ describe("autenticação", () => {
       headers: { cookie },
     });
     expect(r1.statusCode).toBe(200);
-    const cookie2 = cookieOf(r1);
-    expect(cookie2).not.toBe(cookie);
-    // Reusar o token antigo encerra a sessão (possível roubo)...
+    expect(cookieOf(r1)).not.toBe(cookie);
+    // Recarga da página no meio da renovação: o token anterior ainda vale por alguns segundos.
+    const grace = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/refresh",
+      headers: { cookie },
+    });
+    expect(grace.statusCode).toBe(200);
+    const latest = cookieOf(grace);
+    // Passada a tolerância, reusar o token antigo encerra a sessão (possível roubo)...
+    await ownerQuery(db, "UPDATE sessions SET rotated_at = now() - interval '5 minutes'");
     const reuse = await app.inject({
       method: "POST",
       url: "/api/v1/auth/refresh",
       headers: { cookie },
     });
     expect(reuse.statusCode).toBe(401);
-    // ...inclusive para o token novo.
+    // ...inclusive para o token mais recente.
     const after = await app.inject({
       method: "POST",
       url: "/api/v1/auth/refresh",
-      headers: { cookie: cookie2 },
+      headers: { cookie: latest },
     });
     expect(after.statusCode).toBe(401);
     expect(await auditActions()).toContain("auth.refresh_reuse_detected");
@@ -482,5 +493,26 @@ describe("cadastros, papéis e isolamento", () => {
     expect(
       (await api(tenantAdminToken).put("/api/v1/settings", { platformName: "x" })).statusCode,
     ).toBe(403);
+  });
+
+  it("limites dos planos são editáveis só pelo Super Admin e não ficam abaixo do uso", async () => {
+    const a = api(adminToken);
+    const list = (await a.get("/api/v1/plans")).json().items;
+    const basico = list.find((p: { code: string }) => p.code === "basico");
+    expect(basico).toMatchObject({ maxCameras: 50, maxCamerasInUse: 1 });
+    const upd = await a.patch("/api/v1/plans/basico", { maxCameras: 8, maxStorageGb: 20 });
+    expect(upd.statusCode).toBe(200);
+    expect(upd.json()).toMatchObject({ maxCameras: 8, maxStorageBytes: 20 * 1024 ** 3 });
+    expect((await a.patch("/api/v1/plans/basico", { maxCameras: 0 })).statusCode).toBe(400);
+    // Um cliente do plano Pro (Empresa Alfa) tem 5 câmeras.
+    const low = await a.patch("/api/v1/plans/pro", { maxCameras: 4 });
+    expect(low.statusCode).toBe(409);
+    expect((await a.patch("/api/v1/plans/inexistente", { maxCameras: 9 })).statusCode).toBe(404);
+    expect((await api(tenantAdminToken).get("/api/v1/plans")).statusCode).toBe(200);
+    expect(
+      (await api(tenantAdminToken).patch("/api/v1/plans/basico", { maxCameras: 999 })).statusCode,
+    ).toBe(403);
+    expect(await auditActions()).toContain("plan.updated");
+    await a.patch("/api/v1/plans/basico", { maxCameras: 50, maxStorageGb: 10240 });
   });
 });

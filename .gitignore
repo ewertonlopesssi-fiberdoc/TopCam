@@ -8,3 +8,7 @@ reports/*.log
 !reports/.gitkeep
 coverage/
 dump.rdb
+apps/web/.next/
+next-env.d.ts
+reports/screens/
+reports/e2e-output/

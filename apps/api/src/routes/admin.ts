@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { audit } from "../lib/audit.js";
 import { db, effectiveTenant, paged } from "../lib/ctx.js";
-import { pagination, parseBody } from "../lib/http.js";
+import { conflict, notFound, pagination, parseBody } from "../lib/http.js";
 
 /** Metadados para os formulários, configurações da plataforma e trilha de auditoria. */
 
@@ -96,6 +96,76 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         });
       });
       return { ok: true };
+    },
+  );
+
+  // ------------------------------------------------------------------ planos
+  const GB = 1024 ** 3;
+  const planBody = z.object({
+    name: z.string().trim().min(2).max(40).optional(),
+    maxCameras: z.number().int().min(1).max(100_000).optional(),
+    maxStorageGb: z.number().min(1).max(10_000_000).optional(),
+    maxRetentionHours: z
+      .number()
+      .int()
+      .min(1)
+      .max(24 * 3650)
+      .optional(),
+  });
+  const planSelect = `
+    SELECT p.code, p.name, p.max_cameras AS "maxCameras", p.max_storage_bytes::float8 AS "maxStorageBytes",
+           p.max_retention_hours AS "maxRetentionHours",
+           (SELECT count(*)::int FROM tenants t WHERE t.plan_id = p.id AND t.deleted_at IS NULL
+              AND t.status <> 'cancelled') AS "tenantCount",
+           (SELECT coalesce(max(n), 0)::int FROM (
+              SELECT count(c.id) AS n FROM tenants t JOIN cameras c ON c.tenant_id = t.id AND c.deleted_at IS NULL
+               WHERE t.plan_id = p.id AND t.deleted_at IS NULL GROUP BY t.id) x) AS "maxCamerasInUse"
+      FROM plans p`;
+
+  app.get("/api/v1/plans", { preHandler: app.requirePermission("plans.read") }, async () =>
+    withScope(pool, PLATFORM, async (c) => ({
+      items: (await c.query(`${planSelect} ORDER BY p.max_cameras`)).rows,
+    })),
+  );
+
+  app.patch<{ Params: { code: string } }>(
+    "/api/v1/plans/:code",
+    { preHandler: app.requirePermission("settings.write") },
+    async (req) => {
+      const b = parseBody(planBody, req.body);
+      return withScope(pool, PLATFORM, async (c) => {
+        const cur = (
+          await c.query<{ maxCamerasInUse: number; name: string }>(
+            `${planSelect} WHERE p.code = $1 FOR UPDATE OF p`,
+            [req.params.code],
+          )
+        ).rows[0];
+        if (!cur) throw notFound("Plano não encontrado");
+        if (b.maxCameras !== undefined && b.maxCameras < cur.maxCamerasInUse)
+          throw conflict(
+            `Um cliente deste plano já tem ${cur.maxCamerasInUse} câmeras. O limite não pode ficar abaixo disso.`,
+          );
+        await c.query(
+          `UPDATE plans SET name = coalesce($2, name), max_cameras = coalesce($3, max_cameras),
+                  max_storage_bytes = coalesce($4, max_storage_bytes),
+                  max_retention_hours = coalesce($5, max_retention_hours), updated_at = now()
+            WHERE code = $1`,
+          [
+            req.params.code,
+            b.name ?? null,
+            b.maxCameras ?? null,
+            b.maxStorageGb !== undefined ? Math.round(b.maxStorageGb * GB) : null,
+            b.maxRetentionHours ?? null,
+          ],
+        );
+        await audit(c, req, "plan.updated", {
+          tenantId: null,
+          entityType: "plan",
+          entityId: req.params.code,
+          data: { changes: b, before: cur },
+        });
+        return (await c.query(`${planSelect} WHERE p.code = $1`, [req.params.code])).rows[0];
+      });
     },
   );
 

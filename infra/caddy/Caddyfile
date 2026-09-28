@@ -8,7 +8,13 @@
 
 :80 {
 	encode zstd gzip
-	header -Server
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
 
 	# Rotas internas e de saúde nunca são expostas.
 	@internal path /internal/* /ready /health
@@ -18,8 +24,9 @@
 		reverse_proxy api:3000
 	}
 
+	# Painel (Next.js)
 	handle {
-		respond "TopCam — o painel será publicado a partir da Fase 2." 200
+		reverse_proxy web:3000
 	}
 
 	log {

@@ -25,6 +25,9 @@ import {
 const DUMMY_HASH =
   "scrypt$32768$8$1$AAAAAAAAAAAAAAAAAAAAAA==$" + Buffer.alloc(64).toString("base64");
 
+/** Janela em que o refresh token anterior ainda é aceito (respostas perdidas em recargas). */
+const REUSE_GRACE_S = 30;
+
 const loginBody = z.object({
   email: z.string().trim().toLowerCase().email().max(200),
   password: z.string().min(1).max(200),
@@ -86,6 +89,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       (await count(redis, emailKey)) >= env.LOGIN_MAX_ATTEMPTS ||
       (await count(redis, ipKey)) >= env.LOGIN_MAX_ATTEMPTS * 4
     ) {
+      // Registra só o primeiro bloqueio de cada janela (evita inundar a auditoria).
+      const first = await redis.set(`${emailKey}:blocked`, "1", "EX", env.LOGIN_WINDOW_S, "NX");
+      if (first)
+        await withScope(pool, PLATFORM, (c) =>
+          audit(c, req, "auth.login_rate_limited", {
+            tenantId: null,
+            data: { email: body.email },
+          }),
+        );
       throw new HttpError(
         429,
         "too_many_attempts",
@@ -186,18 +198,20 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         user_id: string;
         tenant_id: string | null;
         current: boolean;
+        in_grace: boolean;
       }>(
-        `SELECT id, user_id, tenant_id, refresh_token_hash = $1 AS current
+        `SELECT id, user_id, tenant_id, refresh_token_hash = $1 AS current,
+                coalesce(rotated_at > now() - make_interval(secs => $2), false) AS in_grace
            FROM sessions
           WHERE (refresh_token_hash = $1 OR previous_refresh_hash = $1)
             AND revoked_at IS NULL AND expires_at > now()
           FOR UPDATE`,
-        [hash],
+        [hash, REUSE_GRACE_S],
       );
       const s = rows[0];
       if (!s) return null;
-      if (!s.current) {
-        // Token já rotacionado sendo reutilizado: possível roubo. Encerra a sessão.
+      if (!s.current && !s.in_grace) {
+        // Token já rotacionado reutilizado fora da tolerância: possível roubo. Encerra a sessão.
         await c.query("UPDATE sessions SET revoked_at = now() WHERE id = $1", [s.id]);
         await audit(c, req, "auth.refresh_reuse_detected", {
           tenantId: s.tenant_id,
@@ -206,11 +220,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         });
         return null;
       }
+      // Dentro da tolerância (resposta anterior perdida, ex.: recarga da página no meio
+      // da renovação) o token anterior ainda vale; a janela não é prorrogada.
       await c.query(
-        `UPDATE sessions SET previous_refresh_hash = refresh_token_hash, refresh_token_hash = $2,
-                last_seen_at = now(), expires_at = now() + make_interval(secs => $3)
+        `UPDATE sessions
+            SET previous_refresh_hash = CASE WHEN $4 THEN refresh_token_hash ELSE previous_refresh_hash END,
+                rotated_at = CASE WHEN $4 THEN now() ELSE rotated_at END,
+                refresh_token_hash = $2, last_seen_at = now(),
+                expires_at = now() + make_interval(secs => $3)
           WHERE id = $1`,
-        [s.id, next.hash, refreshTtlS],
+        [s.id, next.hash, refreshTtlS, s.current],
       );
       return loadActiveUser(c, s.user_id, s.id);
     });

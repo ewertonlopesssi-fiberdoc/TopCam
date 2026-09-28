@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+/* Paleta inspirada nas telas de referência: menu lateral azul-marinho,
+   conteúdo claro, azul de ação, verde/vermelho para estados. */
+@theme {
+  --color-navy-950: #07142b;
+  --color-navy-900: #0b1c3a;
+  --color-navy-800: #12264a;
+  --color-navy-700: #1b3360;
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dbe7ff;
+  --color-brand-500: #2f74f5;
+  --color-brand-600: #1d63e6;
+  --color-brand-700: #174fbf;
+  --color-page: #f3f6fb;
+  --color-line: #e3e8f0;
+  --color-ink: #16223a;
+  --color-muted: #64748b;
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --radius-card: 12px;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Barras de rolagem discretas no menu lateral */
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+}
+
+/* Componentes reutilizáveis (Tailwind v4: @utility pode ser usada em @apply). */
+@utility card {
+  @apply rounded-[var(--radius-card)] border border-line bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)];
+}
+
+@utility input {
+  @apply h-10 w-full rounded-lg border border-line bg-white px-3 text-sm text-ink outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100 disabled:bg-slate-50 disabled:text-slate-500;
+}
+
+@utility label {
+  @apply mb-1 block text-xs font-medium text-slate-600;
+}
+
+@utility btn {
+  @apply inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+@utility btn-primary {
+  @apply btn bg-brand-600 text-white hover:bg-brand-700;
+}
+
+@utility btn-secondary {
+  @apply btn border border-line bg-white text-ink hover:bg-slate-50;
+}
+
+@utility btn-danger {
+  @apply btn bg-red-600 text-white hover:bg-red-700;
+}
+
+@utility icon-btn {
+  @apply inline-flex h-8 w-8 items-center justify-center rounded-md border border-line bg-white text-slate-600 transition hover:bg-slate-50 hover:text-brand-600 disabled:opacity-40;
+}
+
+@utility th {
+  @apply px-4 py-3 text-left text-xs font-semibold whitespace-nowrap text-slate-500;
+}
+
+@utility td {
+  @apply px-4 py-3 text-sm whitespace-nowrap text-ink;
+}

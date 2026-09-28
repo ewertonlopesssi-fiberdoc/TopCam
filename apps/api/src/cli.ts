@@ -9,7 +9,15 @@ import {
   rotateStreamKey,
   withScope,
 } from "@topcam/db";
-import { decryptStreamKey, parseEncryptionKey, streamKeyPrefix } from "@topcam/shared";
+import {
+  decryptStreamKey,
+  generateTempPassword,
+  hashPassword,
+  isPlatformRole,
+  isRoleKey,
+  parseEncryptionKey,
+  streamKeyPrefix,
+} from "@topcam/shared";
 
 /**
  * CLI administrativa (as mesmas operações existem no painel a partir da Fase 2).
@@ -17,6 +25,12 @@ import { decryptStreamKey, parseEncryptionKey, streamKeyPrefix } from "@topcam/s
  *   camera:list      [--tenant <slug>]
  *   camera:show-key  --tenant <slug> --code <CAM-001> [--raw]
  *   camera:rotate-key --tenant <slug> --code <CAM-001> [--raw]
+ *   user:create      --email <e-mail> --name <nome> --role <papel> [--tenant <slug>]
+ *   user:reset-password --email <e-mail>   (senha temporária; troca obrigatória no próximo acesso)
+ *   user:disable     --email <e-mail>      (encerra as sessões)
+ *
+ * Os comandos de usuário servem para recuperar o acesso (ex.: único administrador
+ * bloqueado) e para o script de aceite; ficam registrados na auditoria (ator "cli").
  *
  * Exemplo no Compose:
  *   docker compose exec api node apps/api/dist/cli.js camera:show-key --tenant empresa-alfa --code CAM-001
@@ -25,7 +39,10 @@ import { decryptStreamKey, parseEncryptionKey, streamKeyPrefix } from "@topcam/s
 const HELP = `uso:
   camera:list       [--tenant <slug>]
   camera:show-key   --tenant <slug> --code <código> [--raw]
-  camera:rotate-key --tenant <slug> --code <código> [--raw]`;
+  camera:rotate-key --tenant <slug> --code <código> [--raw]
+  user:create         --email <e-mail> --name <nome> --role <papel> [--tenant <slug>]
+  user:reset-password --email <e-mail>
+  user:disable        --email <e-mail>`;
 
 function need(name: string): string {
   const v = process.env[name];
@@ -42,6 +59,9 @@ const { positionals, values } = parseArgs({
     tenant: { type: "string" },
     code: { type: "string" },
     raw: { type: "boolean", default: false },
+    email: { type: "string" },
+    name: { type: "string" },
+    role: { type: "string" },
   },
 });
 
@@ -127,6 +147,94 @@ async function main() {
       return newKey;
     });
     printKey(tenant, code, key, values.raw ?? false);
+    return;
+  }
+
+  if (cmd === "user:create") {
+    const { email, name, role } = values;
+    if (!email || !name || !role || !isRoleKey(role)) {
+      console.error(HELP);
+      process.exit(2);
+    }
+    if (isPlatformRole(role) === Boolean(values.tenant)) {
+      console.error("papel da plataforma não tem cliente; papel de cliente exige --tenant");
+      process.exit(2);
+    }
+    const temp = generateTempPassword();
+    const hashed = await hashPassword(temp);
+    await withScope(pool, PLATFORM, async (c) => {
+      let tenantId: string | null = null;
+      if (values.tenant) {
+        const t = await c.query<{ id: string }>(
+          "SELECT id FROM tenants WHERE slug = $1 AND deleted_at IS NULL",
+          [values.tenant],
+        );
+        if (!t.rows[0]) throw new Error(`cliente ${values.tenant} não encontrado`);
+        tenantId = t.rows[0].id;
+      }
+      const { rows } = await c.query<{ id: string }>(
+        `INSERT INTO users (tenant_id, role_id, name, email, password_hash, must_change_password)
+         VALUES ($1, (SELECT id FROM roles WHERE key = $2), $3, $4, $5, true) RETURNING id`,
+        [tenantId, role, name, email, hashed],
+      );
+      await insertAudit(c, {
+        tenantId,
+        actorType: "cli",
+        action: "user.created",
+        entityType: "user",
+        entityId: rows[0]!.id,
+        data: { email, role },
+      });
+    });
+    console.log(
+      values.raw ? temp : `Usuário criado. Senha temporária (troca obrigatória): ${temp}`,
+    );
+    return;
+  }
+
+  if (cmd === "user:reset-password" || cmd === "user:disable") {
+    if (!values.email) {
+      console.error(HELP);
+      process.exit(2);
+    }
+    const email = values.email;
+    const temp = cmd === "user:reset-password" ? generateTempPassword() : null;
+    const hashed = temp ? await hashPassword(temp) : null;
+    await withScope(pool, PLATFORM, async (c) => {
+      const u = await c.query<{ id: string; tenant_id: string | null }>(
+        "SELECT id, tenant_id FROM users WHERE email = $1 AND deleted_at IS NULL",
+        [email],
+      );
+      const user = u.rows[0];
+      if (!user) throw new Error(`usuário ${email} não encontrado`);
+      if (hashed)
+        await c.query(
+          `UPDATE users SET password_hash = $2, must_change_password = true, status = 'active',
+                  updated_at = now() WHERE id = $1`,
+          [user.id, hashed],
+        );
+      else
+        await c.query("UPDATE users SET status = 'disabled', updated_at = now() WHERE id = $1", [
+          user.id,
+        ]);
+      await c.query(
+        "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+        [user.id],
+      );
+      await insertAudit(c, {
+        tenantId: user.tenant_id,
+        actorType: "cli",
+        action: hashed ? "user.password_reset" : "user.disabled",
+        entityType: "user",
+        entityId: user.id,
+        data: { email },
+      });
+    });
+    if (temp)
+      console.log(
+        values.raw ? temp : `Senha temporária (troca obrigatória no próximo acesso): ${temp}`,
+      );
+    else console.log(`Usuário ${email} desativado; sessões encerradas.`);
     return;
   }
 
