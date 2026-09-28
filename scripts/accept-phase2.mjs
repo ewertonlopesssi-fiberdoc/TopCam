@@ -389,8 +389,12 @@ async function clean() {
   const a = client((await login(ACC_EMAIL, ACC_PASSWORD)).token);
   for (const id of (process.env.CAM_IDS ?? "").split(",").filter(Boolean))
     await a.del(`/api/v1/cameras/${id}`);
-  for (const id of [process.env.TENANT_A, process.env.TENANT_B].filter(Boolean))
+  for (const id of [process.env.TENANT_A, process.env.TENANT_B].filter(Boolean)) {
+    // Usuários dos clientes de aceite saem das listas (exclusão lógica; a auditoria fica).
+    const users = (await a.get(`/api/v1/users?tenantId=${id}&pageSize=100`)).json?.items ?? [];
+    for (const u of users) await a.del(`/api/v1/users/${u.id}`);
     await a.post(`/api/v1/tenants/${id}/status`, { status: "cancelled" });
+  }
 }
 
 try {

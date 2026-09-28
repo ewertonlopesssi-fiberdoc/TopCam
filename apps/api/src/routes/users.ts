@@ -212,6 +212,35 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  // Exclusão lógica: o registro fica para a auditoria; o e-mail é liberado para novo cadastro.
+  app.delete<{ Params: { id: string } }>("/api/v1/users/:id", write, async (req) => {
+    const id = parseBody(uuid, req.params.id);
+    if (id === req.user!.id) throw forbidden("Você não pode excluir a si mesmo");
+    await db(app, req, async (c) => {
+      const target = await loadTarget(c, req, id);
+      if (!assignableRoles(req.user!.role).includes(target.role))
+        throw forbidden("Você não pode excluir este usuário");
+      await c.query(
+        `UPDATE users SET deleted_at = now(), status = 'disabled',
+                email = email || '#excluido-' || extract(epoch from now())::bigint
+          WHERE id = $1`,
+        [id],
+      );
+      await c.query(
+        "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+        [id],
+      );
+      await c.query("DELETE FROM user_camera_permissions WHERE user_id = $1", [id]);
+      await audit(c, req, "user.deleted", {
+        tenantId: target.tenantId,
+        entityType: "user",
+        entityId: id,
+        data: { email: target.email, name: target.name, role: target.role },
+      });
+    });
+    return { ok: true };
+  });
+
   app.post<{ Params: { id: string } }>("/api/v1/users/:id/reset-password", write, async (req) => {
     const id = parseBody(uuid, req.params.id);
     const temporaryPassword = generateTempPassword();

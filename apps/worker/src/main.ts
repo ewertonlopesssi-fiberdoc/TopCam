@@ -18,6 +18,7 @@ import { loadEnv } from "./env.js";
 import { probeJob } from "./jobs/probe.js";
 import { reconcileMediaServer } from "./jobs/reconcile.js";
 import { runFfprobe } from "./lib/ffprobe.js";
+import { guardLiveSessions } from "./live-guard.js";
 import { newPollerState, pollOnce } from "./poller.js";
 
 const env = loadEnv();
@@ -132,6 +133,10 @@ every(env.POLL_INTERVAL_S, "poller", async () => {
   } else if (res.reachable && Date.now() - lastReconcile > env.RECONCILE_INTERVAL_S * 1000) {
     await reconcileNow("periodic");
   }
+});
+
+every(env.LIVE_GUARD_INTERVAL_S, "live-guard", async () => {
+  await guardLiveSessions(ctx);
 });
 
 every(60, "housekeeping", async () => {

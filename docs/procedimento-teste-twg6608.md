@@ -74,6 +74,14 @@ docker compose exec postgres psql -U topcam_owner -d topcam -Atc \
 
 A ocupação estimada em 24 h é **bitrate_kbps × 10,8 MB** (ex.: 2000 kbps ≈ 21,6 GB). O disco de vídeo de 35 GB comporta até cerca de 2 Mbps dentro do primeiro alerta (70%).
 
-## 5. Enviar o resultado
+## 5. Ver ao vivo e medir a latência (Fase 3)
 
-Envie a tabela do item 1, a saída de `camera:list` e os eventos do item 3. Com isso fecho a D1 e ajusto as recomendações da Fase 3 (ao vivo) e da Fase 4 (gravação).
+1. No painel, abra **Câmeras**, clique no ícone de ao vivo (monitor) da CAM-005. Ou abra **Ao Vivo** e escolha a câmera na árvore.
+2. O rodapé do vídeo mostra a tecnologia em uso: **WebRTC** (menor atraso) ou **HLS** (reserva). Teste também com **Transmissão: HLS** na barra de cima.
+3. **Latência de ponta a ponta (cronômetro):** abra um cronômetro com milissegundos no celular e aponte a câmera para ele. Fotografe (com outro celular) a tela do computador mostrando, lado a lado, o cronômetro real e o vídeo da câmera. A diferença entre os dois números é a latência. Faça 3 fotos em WebRTC e 3 em HLS.
+4. Se o vídeo não abrir em WebRTC e cair para HLS, confira se a porta **8189 (UDP e TCP)** da VM está acessível a partir do seu computador.
+5. Em navegadores diferentes (Chrome, Edge, Firefox e o celular), confirme se o vídeo toca. Se a câmera estiver em **H.265**, o Firefox não toca: o painel mostra um aviso.
+
+## 6. Enviar o resultado
+
+Envie a tabela do item 1, a saída de `camera:list`, os eventos do item 3 e as latências do item 5 (WebRTC e HLS). Com isso fecho a D1 e ajusto as recomendações do ao vivo e da Fase 4 (gravação).

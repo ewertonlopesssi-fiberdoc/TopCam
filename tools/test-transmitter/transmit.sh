@@ -5,7 +5,15 @@
 #   transmit.sh once <CHAVE> <SEGUNDOS>     → uma única tentativa por N segundos (sai com o código do ffmpeg)
 #
 # Variáveis: TX_URL (padrão rtmp://mediamtx:1935/live), TX_SIZE (640x360), TX_FPS (15),
-#            TX_BITRATE (800k), TX_AUDIO (1 = AAC 64k; 0 = sem áudio), TX_CODEC (libx264)
+#            TX_BITRATE (800k), TX_AUDIO (1 = AAC 64k; 0 = sem áudio), TX_CODEC (libx264),
+#            TX_CLOCK (1 = relógio no vídeo para medir a latência de ponta a ponta)
+#
+# TX_CLOCK=1 desenha no topo da imagem uma faixa com 24 blocos pretos/brancos: os
+# milissegundos do relógio do servidor (módulo 2^24) no instante em que o quadro foi
+# gerado. O teste do navegador lê os blocos do vídeo e compara com o próprio relógio:
+# a diferença é a latência de ponta a ponta (geração → codificação → RTMP → servidor
+# de mídia → gateway → navegador → tela). Transmissor e navegador precisam do mesmo
+# relógio (mesma máquina ou NTP).
 
 set -u
 MODE="${1:-}"
@@ -16,6 +24,20 @@ TX_FPS="${TX_FPS:-15}"
 TX_BITRATE="${TX_BITRATE:-800k}"
 TX_AUDIO="${TX_AUDIO:-1}"
 TX_CODEC="${TX_CODEC:-libx264}"
+TX_CLOCK="${TX_CLOCK:-0}"
+
+# Faixa de 24 bits com o relógio (ms). O pts vira o relógio real (RTCTIME) só para
+# desenhar e volta a começar do zero antes de codificar.
+clock_filter() {
+  bw=$(( ${TX_SIZE%x*} / 25 ))
+  f="settb=1/1000000,setpts=RTCTIME,drawbox=x=0:y=0:w=iw:h=24:color=black:t=fill"
+  i=0
+  while [ $i -lt 24 ]; do
+    f="$f,drawbox=x=$((i * bw + bw / 2)):y=2:w=$bw:h=20:color=white:t=fill:enable='mod(floor(t*1000/pow(2\,$i))\,2)'"
+    i=$((i + 1))
+  done
+  echo "$f,setpts=PTS-STARTPTS"
+}
 
 if [ -z "$MODE" ] || [ -z "$KEY" ]; then
   echo "uso: transmit.sh publish <chave> [rótulo] | once <chave> <segundos>" >&2
@@ -31,6 +53,9 @@ run_ffmpeg() {
   fi
   if [ -n "$duration" ]; then
     set -- "$@" -t "$duration"
+  fi
+  if [ "$TX_CLOCK" = "1" ]; then
+    set -- "$@" -vf "$(clock_filter)"
   fi
   set -- "$@" -c:v "$TX_CODEC" -preset veryfast -tune zerolatency -pix_fmt yuv420p \
     -b:v "$TX_BITRATE" -maxrate "$TX_BITRATE" -bufsize "$TX_BITRATE" -g "$((TX_FPS * 2))"

@@ -302,3 +302,34 @@ export async function getSetting<T>(client: PoolClient, key: string, fallback: T
   );
   return rows[0] ? rows[0].value : fallback;
 }
+
+/**
+ * O usuário (nesta sessão) ainda pode ver a câmera ao vivo? Mesma regra usada ao
+ * emitir o endereço temporário: usuário ativo sem troca de senha pendente, sessão
+ * não encerrada, cliente do usuário e da câmera ativos, câmera habilitada e — para
+ * papéis com visibilidade por concessão — permissão "ao vivo" na câmera.
+ * Usada pelo gateway (a cada pedido HLS/WHEP) e pelo worker (sessões WebRTC abertas).
+ */
+export async function liveAccessAllowed(
+  client: PoolClient,
+  a: { userId: string; sessionId: string; cameraId: string; grantedRoles: readonly string[] },
+): Promise<boolean> {
+  const { rowCount } = await client.query(
+    `SELECT 1
+       FROM users u
+       JOIN roles r ON r.id = u.role_id
+       JOIN sessions s ON s.id = $2 AND s.user_id = u.id
+       LEFT JOIN tenants ut ON ut.id = u.tenant_id
+       JOIN cameras c ON c.id = $3 AND c.deleted_at IS NULL AND c.enabled
+       JOIN tenants ct ON ct.id = c.tenant_id AND ct.status = 'active'
+      WHERE u.id = $1 AND u.status = 'active' AND u.deleted_at IS NULL
+        AND NOT u.must_change_password
+        AND s.revoked_at IS NULL AND s.expires_at > now()
+        AND (u.tenant_id IS NULL OR (ut.status = 'active' AND c.tenant_id = u.tenant_id))
+        AND (NOT (r.key = ANY($4::text[])) OR EXISTS (
+              SELECT 1 FROM user_camera_permissions p
+               WHERE p.user_id = u.id AND p.camera_id = c.id AND p.can_live))`,
+    [a.userId, a.sessionId, a.cameraId, a.grantedRoles],
+  );
+  return (rowCount ?? 0) > 0;
+}

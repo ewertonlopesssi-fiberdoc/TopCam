@@ -24,8 +24,12 @@ export default function DashboardPage() {
     const safe = (p: Promise<number>) => p.catch(() => null);
     (async () => {
       const [tenants, users, cams, live, rec, off] = await Promise.all([
-        auth.can("tenants.read") ? safe(total("/tenants?pageSize=1")) : Promise.resolve(null),
-        auth.can("users.read") ? safe(total("/users?pageSize=1")) : Promise.resolve(null),
+        auth.can("tenants.read")
+          ? safe(total("/tenants?pageSize=1&status=active"))
+          : Promise.resolve(null),
+        auth.can("users.read")
+          ? safe(total("/users?pageSize=1&status=active"))
+          : Promise.resolve(null),
         safe(total("/cameras?pageSize=1")),
         safe(total("/cameras?pageSize=1&status=ao_vivo")),
         safe(total("/cameras?pageSize=1&status=gravando")),
@@ -34,7 +38,7 @@ export default function DashboardPage() {
       const s: Stat[] = [];
       if (auth.isPlatform)
         s.push({
-          label: "Total de Clientes",
+          label: "Clientes Ativos",
           value: tenants,
           icon: Building2,
           tone: "text-brand-600 bg-brand-50",
@@ -42,7 +46,7 @@ export default function DashboardPage() {
         });
       if (users !== null)
         s.push({
-          label: "Total de Usuários",
+          label: "Usuários Ativos",
           value: users,
           icon: Users,
           tone: "text-violet-600 bg-violet-50",

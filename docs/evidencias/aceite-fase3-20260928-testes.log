@@ -1,0 +1,43 @@
+ Container topcam-redis-1 Running 
+ Container topcam-postgres-1 Running 
+ Container topcam-postgres-1 Waiting 
+ Container topcam-redis-1 Waiting 
+ Container topcam-postgres-1 Healthy 
+ Container topcam-redis-1 Healthy 
+ Container topcam-tests-run-a3647db50980 Creating 
+ Container topcam-tests-run-a3647db50980 Created 
+
+> topcam@0.1.0 lint /app
+> eslint .
+
+
+> topcam@0.1.0 test /app
+> vitest run
+
+
+ RUN  v5.0.2 /app
+
+ ✓ |unit| packages/shared/test/shared.unit.test.ts (14 tests) 115ms
+ ✓ |unit| apps/worker/test/worker.unit.test.ts (5 tests) 10ms
+ ✓ |integration| apps/api/test/phase2.int.test.ts (19 tests) 8059ms
+   ✓ autenticação (6)
+     ✓ recusa senha errada e e-mail inexistente com a mesma mensagem 760ms
+     ✓ bloqueia após 5 tentativas erradas no mesmo e-mail 683ms
+     ✓ primeiro acesso exige troca de senha antes de usar a API 551ms
+   ✓ cadastros, papéis e isolamento (13)
+     ✓ administrador cria usuários do cliente com senha temporária 748ms
+     ✓ administrador do cliente só gerencia o próprio cliente 794ms
+     ✓ desativar usuário e suspender cliente cortam o acesso na hora 452ms
+     ✓ excluir usuário corta o acesso, some da lista e libera o e-mail 780ms
+ ✓ |integration| apps/worker/test/worker.int.test.ts (13 tests) 2912ms
+   ✓ poller de status (5)
+     ✓ recupera câmera transmitindo, detecta vídeo parado e queda 1422ms
+ ✓ |integration| apps/api/test/phase3.int.test.ts (10 tests) 2543ms
+ ✓ |integration| apps/api/test/api.int.test.ts (13 tests) 1558ms
+ ✓ |integration| packages/db/test/db.int.test.ts (11 tests) 1234ms
+
+ Test Files  7 passed (7)
+      Tests  85 passed (85)
+   Start at  23:35:32
+   Duration  20.59s (tests 86%, import 9%, transform 5%)
+

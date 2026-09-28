@@ -10,6 +10,7 @@ import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
 import { cameraRoutes } from "./routes/cameras.js";
 import { healthRoutes } from "./routes/health.js";
+import { liveRoutes } from "./routes/live.js";
 import { locationRoutes } from "./routes/locations.js";
 import { mediamtxRoutes } from "./routes/mediamtx.js";
 import { tenantRoutes } from "./routes/tenants.js";
@@ -71,6 +72,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(userRoutes);
   await app.register(locationRoutes);
   await app.register(cameraRoutes);
+  await app.register(liveRoutes);
   await app.register(adminRoutes);
   return app;
 }

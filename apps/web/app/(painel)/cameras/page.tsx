@@ -7,6 +7,7 @@ import {
   EyeOff,
   KeyRound,
   Loader2,
+  MonitorPlay,
   Pencil,
   Plus,
   Power,
@@ -14,6 +15,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -723,6 +725,16 @@ function CamerasPage() {
               )}
               actions={(c) => (
                 <>
+                  {c.enabled && (
+                    <Link
+                      className="icon-btn"
+                      title="Ao vivo"
+                      aria-label={`Ao vivo ${c.code}`}
+                      href={`/ao-vivo?camera=${c.id}`}
+                    >
+                      <MonitorPlay size={16} />
+                    </Link>
+                  )}
                   <button
                     className="icon-btn"
                     title="Detalhes"

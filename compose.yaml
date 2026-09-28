@@ -29,6 +29,7 @@ x-app: &app
     MEDIA_HOOK_SECRET: ${MEDIA_HOOK_SECRET:?defina MEDIA_HOOK_SECRET}
     MEDIA_READ_USER: topcam-internal
     MEDIA_READ_PASSWORD: ${MEDIA_READ_PASSWORD:?defina MEDIA_READ_PASSWORD}
+    MEDIA_GATEWAY_TOKEN: ${MEDIA_GATEWAY_TOKEN:?defina MEDIA_GATEWAY_TOKEN (scripts/generate-env.sh --add-missing)}
     STREAM_KEY_ENC_KEY: ${STREAM_KEY_ENC_KEY:?defina STREAM_KEY_ENC_KEY}
     PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
     RTMP_PUBLIC_PORT: ${RTMP_PUBLIC_PORT:-1935}
@@ -137,6 +138,8 @@ services:
     logging: *logging
     environment:
       MTX_AUTHHTTPADDRESS: http://api:3000/internal/mediamtx/auth?secret=${MEDIA_HOOK_SECRET}
+      # Endereço anunciado aos navegadores para a mídia WebRTC (porta 8189).
+      MTX_WEBRTCADDITIONALHOSTS: ${PUBLIC_HOST:-localhost}
       MEDIA_HOOK_SECRET: ${MEDIA_HOOK_SECRET}
       TOPCAM_API_URL: http://api:3000
     volumes:
@@ -145,6 +148,10 @@ services:
       - ${RECORDINGS_DIR:-./.data/recordings}:/recordings
     ports:
       - "${RTMP_BIND:-0.0.0.0}:${RTMP_PUBLIC_PORT:-1935}:1935"
+      # Mídia WebRTC do ao vivo. A porta externa precisa ser igual à interna (8189),
+      # pois é a anunciada ao navegador.
+      - "${WEBRTC_BIND:-0.0.0.0}:8189:8189/udp"
+      - "${WEBRTC_BIND:-0.0.0.0}:8189:8189/tcp"
     depends_on:
       api:
         condition: service_healthy
@@ -174,8 +181,17 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     logging: *logging
+    # Pasta montada (não o arquivo) + --watch: o Caddy recarrega sozinho quando o
+    # Caddyfile muda, inclusive depois de um git pull.
+    command:
+      ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile", "--watch"]
+    environment:
+      # Valida /live/<token>/... na API (rota interna protegida pelo segredo dos hooks).
+      MEDIA_HOOK_SECRET: ${MEDIA_HOOK_SECRET}
+      # Token do gateway para ler cam/<id> no MediaMTX (HLS/WHEP).
+      MEDIA_GATEWAY_TOKEN: ${MEDIA_GATEWAY_TOKEN:?defina MEDIA_GATEWAY_TOKEN (scripts/generate-env.sh --add-missing)}
     volumes:
-      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy:/etc/caddy:ro
       - caddydata:/data
     ports:
       - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
@@ -203,6 +219,7 @@ services:
       TX_SIZE: ${TX_SIZE:-640x360}
       TX_FPS: ${TX_FPS:-15}
       TX_BITRATE: ${TX_BITRATE:-800k}
+      TX_CLOCK: ${TX_CLOCK:-0}
     volumes:
       - ./tools/test-transmitter:/tools:ro
     logging: *logging

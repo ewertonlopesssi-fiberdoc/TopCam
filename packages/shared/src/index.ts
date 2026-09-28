@@ -5,3 +5,4 @@ export * from "./events.js";
 export * from "./password.js";
 export * from "./mediamtx-client.js";
 export * from "./permissions.js";
+export * from "./live-token.js";

@@ -31,6 +31,7 @@ beforeAll(async () => {
     REDIS_URL,
     MEDIA_HOOK_SECRET: randomBytes(24).toString("hex"),
     MEDIA_READ_PASSWORD: randomBytes(16).toString("hex"),
+    MEDIA_GATEWAY_TOKEN: "gateway-token-de-teste-1234567890",
     STREAM_KEY_ENC_KEY: db.encKeyB64,
     JWT_SECRET: randomBytes(32).toString("hex"),
     LOG_LEVEL: "silent",
@@ -514,5 +515,36 @@ describe("cadastros, papéis e isolamento", () => {
     ).toBe(403);
     expect(await auditActions()).toContain("plan.updated");
     await a.patch("/api/v1/plans/basico", { maxCameras: 50, maxStorageGb: 10240 });
+  });
+
+  it("excluir usuário corta o acesso, some da lista e libera o e-mail", async () => {
+    const a = api(adminToken);
+    const email = "temporario@lojacentro.test";
+    const u = await a.post("/api/v1/users", {
+      name: "Temporário",
+      email,
+      role: "viewer",
+      tenantId,
+    });
+    expect(u.statusCode).toBe(201);
+    const tok = await activate(email, u.json().temporaryPassword, "VisitaSegura2026");
+    const me = (await a.get("/api/v1/auth/me")).json();
+    expect((await a.del(`/api/v1/users/${me.id}`)).statusCode).toBe(403);
+    expect((await api(tenantAdminToken).del(`/api/v1/users/${u.json().user.id}`)).statusCode).toBe(
+      200,
+    );
+    expect((await api(tok).get("/api/v1/auth/me")).statusCode).toBe(401);
+    expect((await login(email, "VisitaSegura2026")).res.statusCode).toBe(401);
+    const list = (await a.get(`/api/v1/users?tenantId=${tenantId}&pageSize=100`)).json().items;
+    expect(list.some((x: { id: string }) => x.id === u.json().user.id)).toBe(false);
+    expect((await a.get(`/api/v1/users/${u.json().user.id}`)).statusCode).toBe(404);
+    const again = await a.post("/api/v1/users", {
+      name: "De novo",
+      email,
+      role: "viewer",
+      tenantId,
+    });
+    expect(again.statusCode).toBe(201);
+    expect(await auditActions()).toContain("user.deleted");
   });
 });

@@ -1,6 +1,17 @@
 # TopCam — gateway HTTP(S).
-# Fase 1: HTTP na porta 80 (laboratório). HTTPS automático com o domínio
-# definitivo (PUBLIC_HOST) entra na Fase 8.
+# HTTP na porta 80 (laboratório). HTTPS automático com o domínio definitivo
+# (PUBLIC_HOST) entra na Fase 8.
+#
+# Rotas:
+#   /api/*          → api (painel e app)
+#   /live/<token>/* → ao vivo: a API valida o token (forward_auth) e devolve o
+#                     caminho interno cam/<id>; só então o pedido vai ao MediaMTX
+#                     (HLS :8888 ou WHEP :8889) com o token do gateway.
+#   /*              → painel (Next.js)
+#   /internal/*, /ready, /health → 404 (nunca expostos)
+#
+# O Caddy roda com --watch (compose.yaml): alterações neste arquivo são
+# aplicadas sozinhas.
 {
 	admin off
 	auto_https off
@@ -16,12 +27,64 @@
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	# Rotas internas e de saúde nunca são expostas.
+	# Rotas internas e de saúde nunca são expostas. "handle" é avaliado na ordem
+	# em que aparece; por isso este bloco vem primeiro.
 	@internal path /internal/* /ready /health
-	respond @internal 404
+	handle @internal {
+		respond 404
+	}
 
 	handle /api/* {
 		reverse_proxy api:3000
+	}
+
+	# ---------------------------------------------------------------- ao vivo
+	handle /live/* {
+		# Endereços com token não vão para o log de acesso (o token é uma credencial).
+		log_skip
+		# Nunca aceitar do navegador os cabeçalhos que a API devolve.
+		request_header -X-Media-Path
+		request_header -X-Media-Kind
+
+		# "route" mantém a ordem abaixo (sem ela, o Caddy faria o rewrite antes do forward_auth).
+		route {
+			forward_auth api:3000 {
+				uri /internal/live/auth?secret={$MEDIA_HOOK_SECRET}
+				copy_headers X-Media-Path X-Media-Kind
+			}
+
+			# Troca /live/<token>/<recurso> por /cam/<id>/<recurso>, mantendo a query
+			# (sessão HLS e parâmetros do LL-HLS).
+			rewrite * {http.request.header.X-Media-Path}?{query}
+
+			@whep header X-Media-Kind whep
+			handle @whep {
+				reverse_proxy mediamtx:8889 {
+					header_up Authorization "Bearer {$MEDIA_GATEWAY_TOKEN}"
+					header_up -Cookie
+					header_up -X-Media-Path
+					header_up -X-Media-Kind
+					# Evita a janela de usuário/senha do navegador se o MediaMTX recusar.
+					header_down -WWW-Authenticate
+					# O MediaMTX devolve o endereço da sessão WHEP; o navegador não precisa dele
+					# (a sessão termina ao fechar a conexão).
+					header_down -Location
+				}
+			}
+			handle {
+				header Cache-Control "no-store"
+				reverse_proxy mediamtx:8888 {
+					header_up Authorization "Bearer {$MEDIA_GATEWAY_TOKEN}"
+					header_up -Cookie
+					header_up -X-Media-Path
+					header_up -X-Media-Kind
+					# Evita a janela de usuário/senha do navegador se o MediaMTX recusar.
+					header_down -WWW-Authenticate
+					# Sessão HLS vai na query; nenhum cookie do servidor de mídia chega ao navegador.
+					header_down -Set-Cookie
+				}
+			}
+		}
 	}
 
 	# Painel (Next.js)

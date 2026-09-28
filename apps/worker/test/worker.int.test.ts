@@ -3,6 +3,7 @@ import { createPool, type JobRow, type Pool } from "@topcam/db";
 import {
   decryptStreamKey,
   generateStreamKey,
+  signLiveToken,
   mediaPathForKey,
   parseEncryptionKey,
   type MediaMtxClient,
@@ -16,7 +17,10 @@ import type { ProbeOutput, WorkerContext } from "../src/context.js";
 import { loadEnv } from "../src/env.js";
 import { probeJob } from "../src/jobs/probe.js";
 import { reconcileMediaServer } from "../src/jobs/reconcile.js";
+import { guardLiveSessions } from "../src/live-guard.js";
 import { newPollerState, pollOnce } from "../src/poller.js";
+
+const LIVE_SECRET = randomBytes(32).toString("hex");
 
 /** MediaMTX falso em memória. */
 class FakeMtx {
@@ -30,6 +34,8 @@ class FakeMtx {
     remoteAddr: string;
   }> = [];
   kicked: string[] = [];
+  webrtc: Array<{ id: string; path: string; query: string }> = [];
+  kickedWebrtc: string[] = [];
   down = false;
   private check() {
     if (this.down) throw new Error("MediaMTX inacessível");
@@ -58,6 +64,13 @@ class FakeMtx {
   async listPublishers() {
     this.check();
     return this.publishers.map((p) => ({ ...p, created: "", bytesReceived: 0 }));
+  }
+  async listWebrtcSessions() {
+    return this.webrtc;
+  }
+  async kickWebrtcSession(id: string) {
+    this.kickedWebrtc.push(id);
+    this.webrtc = this.webrtc.filter((w) => w.id !== id);
   }
   async kick(_k: string, id: string) {
     this.kicked.push(id);
@@ -92,6 +105,7 @@ beforeAll(async () => {
     REDIS_URL: "redis://unused",
     MEDIA_READ_PASSWORD: randomBytes(16).toString("hex"),
     STREAM_KEY_ENC_KEY: db.encKeyB64,
+    JWT_SECRET: LIVE_SECRET,
     OFFLINE_AFTER_S: "1",
     CONNECT_TIMEOUT_S: "1",
   });
@@ -385,5 +399,44 @@ describe("poller de status", () => {
     expect(r2.recovered).toBe(true);
     alerts = await ownerQuery(db, "SELECT status FROM alerts WHERE rule = 'ingest_unreachable'");
     expect(alerts.map((a) => a.status)).toEqual(["resolved"]);
+  });
+});
+
+describe("guarda das sessões WebRTC do ao vivo", () => {
+  it("mantém sessões válidas e encerra as revogadas, sem token ou de outra câmera", async () => {
+    const [admin] = await ownerQuery<{ id: string }>(
+      db,
+      "SELECT id FROM users WHERE email = 'admin@test.local'",
+    );
+    const [session] = await ownerQuery<{ id: string }>(
+      db,
+      `INSERT INTO sessions (user_id, refresh_token_hash, client, expires_at)
+       VALUES ($1, 'hash-guarda-webrtc', 'web', now() + interval '1 hour') RETURNING id`,
+      [admin!.id],
+    );
+    await ownerQuery(db, "UPDATE users SET must_change_password = false WHERE id = $1", [
+      admin!.id,
+    ]);
+    const cam1 = (await cam("CAM-001")).id;
+    const cam2 = (await cam("CAM-002")).id;
+    const tok = (c: string, e = Math.floor(Date.now() / 1000) + 60) =>
+      signLiveToken(LIVE_SECRET, { c, u: admin!.id, s: session!.id, e });
+    mtx.webrtc = [
+      { id: "ok", path: `cam/${cam1}`, query: `t=${tok(cam1)}` },
+      // Token vencido não derruba quem já está assistindo: vale a permissão atual.
+      { id: "vencido", path: `cam/${cam1}`, query: `t=${tok(cam1, 1000)}` },
+      { id: "sem-token", path: `cam/${cam1}`, query: "" },
+      { id: "forjado", path: `cam/${cam1}`, query: `t=${tok(cam1).slice(0, -2)}xx` },
+      { id: "outra-camera", path: `cam/${cam2}`, query: `t=${tok(cam1)}` },
+    ];
+    const r = await guardLiveSessions(ctx);
+    expect(r).toEqual({ checked: 5, kicked: 3 });
+    expect(mtx.kickedWebrtc.sort()).toEqual(["forjado", "outra-camera", "sem-token"]);
+
+    // Logout (sessão encerrada) → as sessões restantes caem.
+    await ownerQuery(db, "UPDATE sessions SET revoked_at = now() WHERE id = $1", [session!.id]);
+    const r2 = await guardLiveSessions(ctx);
+    expect(r2).toEqual({ checked: 2, kicked: 2 });
+    expect(mtx.webrtc).toHaveLength(0);
   });
 });

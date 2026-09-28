@@ -44,6 +44,17 @@ interface ListResponse<T> {
   items: T[];
 }
 
+export interface MtxWebrtcSession {
+  id: string;
+  created?: string;
+  state?: string;
+  path?: string;
+  query?: string;
+  peerConnectionEstablished?: boolean;
+  remoteCandidate?: string;
+  bytesSent?: number;
+}
+
 export class MediaMtxError extends Error {
   constructor(
     message: string,
@@ -118,6 +129,15 @@ export class MediaMtxClient {
 
   async kick(kind: "rtmpconns" | "rtmpsconns", id: string): Promise<void> {
     await this.request("POST", `/v3/${kind}/kick/${id}`);
+  }
+
+  /** Sessões WebRTC abertas (ao vivo via WHEP). */
+  listWebrtcSessions(): Promise<MtxWebrtcSession[]> {
+    return this.listAll<MtxWebrtcSession>("/v3/webrtcsessions/list");
+  }
+
+  async kickWebrtcSession(id: string): Promise<void> {
+    await this.request("POST", `/v3/webrtcsessions/kick/${id}`);
   }
 
   listPathConfs(): Promise<MtxPathConf[]> {

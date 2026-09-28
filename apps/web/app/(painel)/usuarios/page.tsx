@@ -7,6 +7,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Trash2,
   UserCheck,
   UserX,
   Users,
@@ -409,6 +410,7 @@ export default function UsuariosPage() {
   const [temp, setTemp] = useState<{ email: string; password: string } | null>(null);
   const [resetting, setResetting] = useState<User | null>(null);
   const [toggling, setToggling] = useState<User | null>(null);
+  const [deleting, setDeleting] = useState<User | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -630,6 +632,14 @@ export default function UsuariosPage() {
                     >
                       {u.status === "active" ? <UserX size={16} /> : <UserCheck size={16} />}
                     </button>
+                    <button
+                      className="icon-btn hover:!text-red-600"
+                      title="Excluir"
+                      aria-label={`Excluir ${u.name}`}
+                      onClick={() => setDeleting(u)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </>
                 ) : null
               }
@@ -730,6 +740,28 @@ export default function UsuariosPage() {
               status: toggling!.status === "active" ? "disabled" : "active",
             });
             toast(toggling!.status === "active" ? "Usuário desativado" : "Usuário reativado");
+            await load();
+          } catch (err) {
+            toast((err as Error).message, "error");
+          }
+        }}
+      />
+      <Confirm
+        open={!!deleting}
+        danger
+        title="Excluir usuário"
+        confirmLabel="Excluir"
+        message={
+          <>
+            Excluir <b>{deleting?.name}</b> ({deleting?.email})? O acesso é cortado na hora e o
+            usuário sai das listas. O histórico continua na auditoria.
+          </>
+        }
+        onClose={() => setDeleting(null)}
+        onConfirm={async () => {
+          try {
+            await api.del(`/users/${deleting!.id}`);
+            toast("Usuário excluído");
             await load();
           } catch (err) {
             toast((err as Error).message, "error");

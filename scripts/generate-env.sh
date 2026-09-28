@@ -28,6 +28,7 @@ if [ "$ADD_MISSING" -eq 1 ]; then
     grep -q "^${var}=" .env && continue
     case "$var" in
       JWT_SECRET) value="$(rand 48)" ;;
+      MEDIA_GATEWAY_TOKEN) value="$(rand 40)" ;;
       *) value="${line#*=}" ;;
     esac
     printf '%s=%s\n' "$var" "$value" >> .env
@@ -51,6 +52,7 @@ set_var APP_DB_PASSWORD "$(rand 32)"
 set_var MEDIA_HOOK_SECRET "$(rand 40)"
 set_var MEDIA_READ_PASSWORD "$(rand 32)"
 set_var JWT_SECRET "$(rand 48)"
+set_var MEDIA_GATEWAY_TOKEN "$(rand 40)"
 set_var STREAM_KEY_ENC_KEY "$(openssl rand -base64 32)"
 set_var ADMIN_INITIAL_PASSWORD "$(rand 20)"
 [ -n "$PUBLIC_HOST_ARG" ] && set_var PUBLIC_HOST "$PUBLIC_HOST_ARG"

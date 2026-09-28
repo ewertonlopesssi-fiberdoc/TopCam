@@ -88,6 +88,7 @@ export const AUDIT_LABELS: Record<string, string> = {
   "auth.login_rate_limited": "Login bloqueado por excesso de tentativas",
   "user.updated": "Usuário alterado",
   "user.disabled": "Usuário desativado",
+  "user.deleted": "Usuário excluído",
   "user.password_reset": "Senha redefinida",
   "user.camera_permissions_updated": "Permissões de câmeras alteradas",
   "location.created": "Local criado",

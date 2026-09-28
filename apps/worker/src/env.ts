@@ -13,6 +13,10 @@ const schema = z.object({
   MEDIA_READ_USER: z.string().min(3).default("topcam-internal"),
   MEDIA_READ_PASSWORD: z.string().min(24),
   STREAM_KEY_ENC_KEY: z.string().min(40),
+  /** Mesmo segredo da API: o worker confere os tokens do ao vivo das sessões WebRTC. */
+  JWT_SECRET: z.string().min(32),
+  /** Intervalo da conferência das sessões WebRTC abertas (revogação de acesso). */
+  LIVE_GUARD_INTERVAL_S: z.coerce.number().positive().default(10),
   /** Diretório de gravações como o MediaMTX o enxerga (volume compartilhado). */
   RECORDINGS_PATH: z.string().default("/recordings"),
   POLL_INTERVAL_S: z.coerce.number().positive().default(5),

@@ -104,3 +104,8 @@ export const ROLE_LABELS: Record<RoleKey, string> = {
   operator: "Operador",
   viewer: "Visualizador",
 };
+
+/** Papéis que só veem câmeras concedidas (user_camera_permissions). */
+export const GRANTED_VISIBILITY_ROLES: readonly RoleKey[] = ROLE_KEYS.filter(
+  (r) => cameraVisibility(r) === "granted",
+);

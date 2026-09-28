@@ -44,6 +44,7 @@ beforeAll(async () => {
     REDIS_URL,
     MEDIA_HOOK_SECRET: SECRET,
     MEDIA_READ_PASSWORD: READ_PASS,
+    MEDIA_GATEWAY_TOKEN: "gateway-token-de-teste-1234567890",
     STREAM_KEY_ENC_KEY: db.encKeyB64,
     JWT_SECRET: randomBytes(32).toString("hex"),
     LOG_LEVEL: "silent",

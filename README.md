@@ -4,7 +4,7 @@ Plataforma multiempresa de câmeras IP: recebe câmeras por **RTMP push** (cada 
 
 O laboratório roda numa única VM Debian no Proxmox (disco de 25 GB para o sistema + 35 GB para vídeo). Todos os serviços ficam em contêineres separados, para que a migração ao servidor dedicado mude apenas configuração e escala.
 
-> **Estado atual: Fase 2 — painel web com login, papéis, permissões por câmera e cadastros.** Ao vivo no navegador (Fase 3) e gravação (Fase 4) ainda não estão disponíveis; as telas correspondentes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
+> **Estado atual: Fase 3 — ao vivo no navegador (WebRTC e HLS).** Painel com login, papéis, permissões por câmera, cadastros e a tela Ao Vivo. A gravação (Fase 4) ainda não está disponível; as telas das fases seguintes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
 
 ---
 
@@ -15,8 +15,10 @@ Câmera / transmissor ──RTMP :1935──► mediamtx ──auth HTTP + hooks
                                         ▲                             │
                                         │ API de controle              ▼
                                         └────────── worker ◄──── Redis (acordar tarefas)
-Navegador ──HTTP :80──► gateway (Caddy) ──/api/*──► api
-                                         └──/*──────► web (Next.js, painel)
+Navegador ──HTTP :80──► gateway (Caddy) ──/api/*──────────► api
+                                         ├──/live/<token>/*──► (api confere o token) ──► mediamtx HLS/WHEP
+                                         └──/*──────────────► web (Next.js, painel)
+Navegador ◄──── mídia WebRTC :8189 (UDP/TCP) ──── mediamtx
 ```
 
 | Serviço    | Papel                                                                                                         |
@@ -26,9 +28,9 @@ Navegador ──HTTP :80──► gateway (Caddy) ──/api/*──► api
 | `migrate`  | Aplica migrations e o seed idempotente e termina.                                                             |
 | `api`      | API REST do painel e do app (login, cadastros, permissões, auditoria) e autorização/hooks do MediaMTX.        |
 | `worker`   | Valida o vídeo (ffprobe), mantém os caminhos do MediaMTX iguais ao banco, monitora estados, bitrate e quedas. |
-| `mediamtx` | Recebe RTMP. API, RTSP e HLS ficam só na rede interna.                                                        |
+| `mediamtx` | Recebe RTMP e entrega o ao vivo (HLS/WebRTC). API, RTSP, HLS e a sinalização WebRTC ficam só na rede interna. |
 | `web`      | Painel administrativo (Next.js). Só consome a API, a mesma que o app mobile usará.                            |
-| `gateway`  | Entrada HTTP. Bloqueia rotas internas, aplica cabeçalhos de segurança. HTTPS com o domínio na Fase 8.         |
+| `gateway`  | Entrada HTTP. Bloqueia rotas internas, confere o token do ao vivo na API, aplica cabeçalhos de segurança.     |
 
 ### Caminhos no servidor de mídia
 
@@ -73,6 +75,7 @@ Navegador ──HTTP :80──► gateway (Caddy) ──/api/*──► api
    ```bash
    scripts/accept-phase1.sh     # ingestão RTMP, ~12 min
    scripts/accept-phase2.sh     # login, isolamento, permissões, auditoria, ~3 min
+   scripts/accept-phase3.sh     # ao vivo das 5 câmeras (HLS, WebRTC, segurança), ~3 min
    ```
 6. **Entrar no painel:** `http://<PUBLIC_HOST>` com `ADMIN_EMAIL` e `ADMIN_INITIAL_PASSWORD` do `.env`. No primeiro acesso o sistema exige a troca da senha (mínimo 10 caracteres, letras e números, sem conter o e-mail).
 
@@ -80,21 +83,22 @@ Navegador ──HTTP :80──► gateway (Caddy) ──/api/*──► api
 
 ```bash
 cd /opt/topcam
-git pull
-scripts/generate-env.sh --add-missing   # acrescenta variáveis novas (ex.: JWT_SECRET) sem mexer nas atuais
-docker compose up -d --build            # o serviço migrate aplica as migrations novas
-docker compose ps
+scripts/update.sh                            # do GitHub
+scripts/update.sh --bundle /root/arquivo.bundle   # ou de um pacote .bundle
 ```
+
+O script faz, em sequência: `git pull`, acrescenta ao `.env` as variáveis novas (sem mexer nas atuais), constrói e sobe tudo (o serviço `migrate` aplica as migrations novas), recria o gateway e o servidor de mídia quando a configuração deles muda e espera todos ficarem saudáveis. Ele recusa atualizar se houver alterações locais nos arquivos do projeto.
 
 ### Portas
 
-| Porta    | Uso              | Exposição                           |
-| -------- | ---------------- | ----------------------------------- |
-| 1935/tcp | RTMP das câmeras | Pública (ou só na rede das câmeras) |
-| 80/tcp   | Gateway HTTP     | Pública. 443 entra na Fase 8        |
-| 22/tcp   | SSH              | Somente rede de administração       |
+| Porta               | Uso                     | Exposição                                       |
+| ------------------- | ----------------------- | ----------------------------------------------- |
+| 1935/tcp            | RTMP das câmeras        | Pública (ou só na rede das câmeras)             |
+| 80/tcp              | Gateway HTTP            | Pública. 443 entra na Fase 8                    |
+| 8189/udp e 8189/tcp | Mídia WebRTC do ao vivo | Rede de quem assiste. Sem ela, o painel usa HLS |
+| 22/tcp              | SSH                     | Somente rede de administração                   |
 
-Postgres, Redis, API do MediaMTX, RTSP e HLS **não** são publicados.
+Postgres, Redis, API do MediaMTX, RTSP, HLS e a sinalização WebRTC **não** são publicados. A porta 8189 precisa ser a mesma dentro e fora (é a anunciada ao navegador, no endereço `PUBLIC_HOST`).
 
 ---
 
@@ -110,6 +114,8 @@ Postgres, Redis, API do MediaMTX, RTSP e HLS **não** são publicados.
 
 - **Câmeras → Nova Câmera** gera o código (CAM-###) e a chave exclusiva e mostra servidor, chave e URL completa para configurar a câmera. Depois, a chave só aparece em "Exibir dados de configuração" (registrado na auditoria). "Trocar chave" invalida a anterior e desconecta quem a usa.
 - **Usuários** cria o acesso com senha temporária (exibida uma única vez) e define, por usuário, quais câmeras ele vê.
+- **Ao Vivo:** árvore Empresa › Local › Grupo, mosaico 1/4/9/16, tela cheia, foco numa câmera (duplo clique ou clique na árvore), pausa, som, captura de imagem. "Automático" tenta **WebRTC** (menor atraso) e, se não conectar, usa **HLS**. O ícone de monitor na lista de Câmeras abre a câmera ao vivo.
+- **Segurança do ao vivo:** o navegador recebe só um endereço temporário `/live/<token>/…` (2 h), ligado ao usuário, à sessão e à câmera. A chave RTMP e o caminho interno nunca chegam ao navegador. O gateway reconfere o acesso a cada pedido (cache de 5 s); no WebRTC, o worker encerra a cada 10 s as conexões cujo acesso foi retirado (logout, usuário ou cliente desativado, permissão ou câmera retirada). Abrir o ao vivo fica na auditoria (um registro por usuário e câmera a cada 30 min).
 - **Sessão:** token de acesso de 15 min em memória e renovação por cookie httpOnly (30 dias), trocado a cada uso. Login bloqueia 15 min após 5 erros no mesmo e-mail (ou 20 no mesmo IP).
 
 ## Operação
@@ -135,6 +141,7 @@ docker compose logs -f api worker mediamtx web
 docker compose exec api node apps/api/dist/cli.js user:reset-password --email voce@dominio.com.br
 docker compose exec api node apps/api/dist/cli.js user:create --email x@y --name "Nome" --role platform_admin
 docker compose exec api node apps/api/dist/cli.js user:disable --email x@y
+docker compose exec api node apps/api/dist/cli.js user:delete --email x@y
 ```
 
 Toda exibição e troca de chave fica registrada em `audit_logs`.
@@ -160,7 +167,7 @@ docker compose --profile test run -d --rm --name tx-cam1 test-transmitter publis
 docker rm -f tx-cam1        # derruba (simula queda)
 ```
 
-Para mudar a resolução, a taxa de quadros e o bitrate, use as variáveis `TX_SIZE`, `TX_FPS` e `TX_BITRATE` no `.env`.
+Para mudar a resolução, a taxa de quadros e o bitrate, use as variáveis `TX_SIZE`, `TX_FPS` e `TX_BITRATE` no `.env`. Com `TX_CLOCK=1`, o transmissor desenha no topo do vídeo uma faixa com o relógio (usada para medir a latência no navegador).
 
 ---
 
@@ -190,6 +197,8 @@ pnpm install && pnpm exec playwright install chromium
 E2E_BASE_URL=http://<PUBLIC_HOST> E2E_ADMIN_EMAIL=<ADMIN_EMAIL> \
 E2E_ADMIN_NEW_PASSWORD='<senha atual do admin>' pnpm exec playwright test
 ```
+
+**Ao vivo (E2E):** com as 5 câmeras da Empresa Alfa transmitindo (`scripts/accept-phase3.sh --keep-tx`), acrescente `E2E_LIVE=1`. É preciso um navegador com H.264 — o Chromium do Playwright não tem o codec; use o Google Chrome com `PW_CHROMIUM_PATH=/usr/bin/google-chrome` (ou o caminho no seu sistema). O teste mede a latência de ponta a ponta lendo, na tela, o relógio que o transmissor desenha no vídeo da CAM-001 (`TX_CLOCK=1`) e grava o resultado em `reports/latencia-ao-vivo.json`.
 
 Se o administrador ainda estiver no primeiro acesso, informe também `E2E_ADMIN_PASSWORD=<ADMIN_INITIAL_PASSWORD>`: o teste faz a troca pela tela, definindo a senha de `E2E_ADMIN_NEW_PASSWORD`. Use um ambiente de teste: o fluxo cria clientes e usuários fictícios.
 

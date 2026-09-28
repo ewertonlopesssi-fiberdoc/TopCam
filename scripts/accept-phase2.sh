@@ -8,7 +8,7 @@
 #   3. P11: transmite com o transmissor de teste usando a chave devolvida pelo cadastro e confere
 #      que a câmera fica "Ao vivo";
 #   4. P12: testes automatizados (lint + unitários + integração);
-#   5. limpa: exclui as câmeras de aceite, cancela os clientes de aceite e desativa o usuário.
+#   5. limpa: exclui câmeras e usuários de aceite, cancela os clientes de aceite e exclui o usuário temporário.
 # Relatório em reports/phase2-<data>.md.
 #
 # Uso:  scripts/accept-phase2.sh [--no-build] [--skip-tests]
@@ -93,7 +93,7 @@ cleanup() {
   log "limpeza: câmeras e clientes de aceite, usuário temporário"
   [ -n "${OUT_CAM_IDS:-}" ] && stage clean "CAM_IDS=$OUT_CAM_IDS" "TENANT_A=${OUT_TENANT_A:-}" "TENANT_B=${OUT_TENANT_B:-}" >/dev/null 2>&1
   docker rm -f "topcam-tx-aceite2" >/dev/null 2>&1
-  dc exec -T api node apps/api/dist/cli.js user:disable --email "$ACC_EMAIL" >/dev/null 2>&1
+  dc exec -T api node apps/api/dist/cli.js user:delete --email "$ACC_EMAIL" >/dev/null 2>&1
 }
 trap cleanup EXIT
 

@@ -2,8 +2,12 @@
 #
 # - Toda publicação e leitura é autorizada pela API (authMethod: http).
 #   O endereço com o segredo vem da variável MTX_AUTHHTTPADDRESS (compose.yaml).
-# - API de controle (9997), métricas (9998), RTSP (8554) e HLS (8888) ficam só
-#   na rede interna dos contêineres. Só a porta RTMP é publicada.
+# - API de controle (9997), métricas (9998), RTSP (8554), HLS (8888) e a
+#   sinalização WebRTC (8889) ficam só na rede interna dos contêineres. São
+#   publicadas apenas a porta RTMP (câmeras) e a 8189 (mídia WebRTC, UDP/TCP).
+# - Ao vivo: o navegador acessa /live/<token>/... no gateway; o gateway valida o
+#   token na API e só então encaminha para cam/<id> aqui (HLS ou WHEP), com o
+#   token interno do gateway (Bearer), que só permite ler caminhos cam/<id>.
 # - Caminhos:
 #     live/<chave>  → entrada: a câmera publica aqui; usa "all_others" com os
 #                     padrões abaixo (nunca grava). A API decide quem publica.
@@ -43,13 +47,28 @@ rtmp: true
 rtmpEncryption: "no"
 rtmpAddress: :1935
 
-# HLS interno; acesso público via gateway com token temporário na Fase 3.
+# HLS interno (Low-Latency HLS); acesso público só via gateway com token temporário.
 hls: true
 hlsAddress: :8888
 hlsAllowOrigins: []
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+# Libera o muxer 30 s depois do último espectador (câmeras só ao vivo voltam a não ler nada).
+hlsMuxerCloseAfter: 30s
 
-# WebRTC: Fase 3.
-webrtc: false
+# WebRTC (WHEP): sinalização interna (8889) via gateway; mídia direto na porta 8189
+# (UDP, com TCP como alternativa). O endereço anunciado ao navegador vem de
+# MTX_WEBRTCADDITIONALHOSTS (= PUBLIC_HOST) no compose.yaml.
+webrtc: true
+webrtcAddress: :8889
+webrtcAllowOrigins: []
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+# Só o endereço público (PUBLIC_HOST) é anunciado; IPs internos dos contêineres não.
+webrtcIPsFromInterfaces: false
+webrtcHandshakeTimeout: 10s
 srt: false
 moq: false
 

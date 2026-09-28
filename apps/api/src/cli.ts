@@ -28,6 +28,7 @@ import {
  *   user:create      --email <e-mail> --name <nome> --role <papel> [--tenant <slug>]
  *   user:reset-password --email <e-mail>   (senha temporária; troca obrigatória no próximo acesso)
  *   user:disable     --email <e-mail>      (encerra as sessões)
+ *   user:delete      --email <e-mail>      (exclusão lógica; some das listas, fica na auditoria)
  *
  * Os comandos de usuário servem para recuperar o acesso (ex.: único administrador
  * bloqueado) e para o script de aceite; ficam registrados na auditoria (ator "cli").
@@ -42,7 +43,8 @@ const HELP = `uso:
   camera:rotate-key --tenant <slug> --code <código> [--raw]
   user:create         --email <e-mail> --name <nome> --role <papel> [--tenant <slug>]
   user:reset-password --email <e-mail>
-  user:disable        --email <e-mail>`;
+  user:disable        --email <e-mail>
+  user:delete         --email <e-mail>`;
 
 function need(name: string): string {
   const v = process.env[name];
@@ -192,7 +194,7 @@ async function main() {
     return;
   }
 
-  if (cmd === "user:reset-password" || cmd === "user:disable") {
+  if (cmd === "user:reset-password" || cmd === "user:disable" || cmd === "user:delete") {
     if (!values.email) {
       console.error(HELP);
       process.exit(2);
@@ -207,7 +209,15 @@ async function main() {
       );
       const user = u.rows[0];
       if (!user) throw new Error(`usuário ${email} não encontrado`);
-      if (hashed)
+      if (cmd === "user:delete") {
+        await c.query(
+          `UPDATE users SET deleted_at = now(), status = 'disabled',
+                  email = email || '#excluido-' || extract(epoch from now())::bigint
+            WHERE id = $1`,
+          [user.id],
+        );
+        await c.query("DELETE FROM user_camera_permissions WHERE user_id = $1", [user.id]);
+      } else if (hashed)
         await c.query(
           `UPDATE users SET password_hash = $2, must_change_password = true, status = 'active',
                   updated_at = now() WHERE id = $1`,
@@ -224,7 +234,8 @@ async function main() {
       await insertAudit(c, {
         tenantId: user.tenant_id,
         actorType: "cli",
-        action: hashed ? "user.password_reset" : "user.disabled",
+        action:
+          cmd === "user:delete" ? "user.deleted" : hashed ? "user.password_reset" : "user.disabled",
         entityType: "user",
         entityId: user.id,
         data: { email },
@@ -234,7 +245,10 @@ async function main() {
       console.log(
         values.raw ? temp : `Senha temporária (troca obrigatória no próximo acesso): ${temp}`,
       );
-    else console.log(`Usuário ${email} desativado; sessões encerradas.`);
+    else
+      console.log(
+        `Usuário ${email} ${cmd === "user:delete" ? "excluído" : "desativado"}; sessões encerradas.`,
+      );
     return;
   }
 

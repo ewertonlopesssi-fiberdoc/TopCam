@@ -171,6 +171,16 @@ test.describe("telas responsivas", () => {
       await page.goto(`/${path}`);
       await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
       await page.waitForLoadState("networkidle");
+      if (path === "ao-vivo" && process.env.E2E_LIVE === "1") {
+        const client = page.getByLabel("Cliente");
+        if (await client.count()) await client.selectOption({ label: "Empresa Alfa" });
+        await expect(page.locator("[data-testid=live-tile]").first()).toHaveAttribute(
+          "data-state",
+          "playing",
+          { timeout: 20_000 },
+        );
+        await page.waitForTimeout(1500);
+      }
       await noHorizontalOverflow(page);
       await page.screenshot({
         path: `reports/screens/${info.project.name}-${path}.png`,

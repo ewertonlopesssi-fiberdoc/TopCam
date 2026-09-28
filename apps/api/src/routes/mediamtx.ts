@@ -43,6 +43,7 @@ const hookBody = z.object({
 });
 
 const PUBLISH_PROTOCOLS = new Set(["rtmp", "rtmps"]);
+const CAM_PATH = /^cam\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export async function mediamtxRoutes(app: FastifyInstance): Promise<void> {
   const { env, pool, redis } = app.deps;
@@ -85,9 +86,31 @@ export async function mediamtxRoutes(app: FastifyInstance): Promise<void> {
 
     // ------------------------------------------------------------- leitura interna
     if (body.action === "read" || body.action === "playback") {
-      const ok =
-        body.user === env.MEDIA_READ_USER && safeEqual(body.password, env.MEDIA_READ_PASSWORD);
-      return ok ? reply.code(200).send() : deny(reply);
+      // Worker/relay: credencial interna (RTSP), qualquer caminho.
+      if (body.user === env.MEDIA_READ_USER && safeEqual(body.password, env.MEDIA_READ_PASSWORD))
+        return reply.code(200).send();
+      // Gateway do ao vivo: token próprio, só cam/<id> e só HLS/WebRTC. O usuário final já
+      // foi autorizado pela API (forward_auth) antes de o gateway chegar aqui.
+      if (
+        body.action === "read" &&
+        body.token &&
+        safeEqual(body.token, env.MEDIA_GATEWAY_TOKEN) &&
+        CAM_PATH.test(body.path) &&
+        (body.protocol === "hls" || body.protocol === "webrtc")
+      )
+        return reply.code(200).send();
+      req.log.warn(
+        {
+          action: body.action,
+          path: body.path.startsWith("live/") ? "live/<chave>" : body.path,
+          protocol: body.protocol,
+          user: body.user,
+          hasToken: Boolean(body.token),
+          ip: body.ip,
+        },
+        "leitura recusada no servidor de mídia",
+      );
+      return deny(reply);
     }
     if (body.action !== "publish") return deny(reply);
 
