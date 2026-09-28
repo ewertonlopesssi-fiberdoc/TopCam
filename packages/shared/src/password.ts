@@ -39,3 +39,24 @@ export async function verifyPassword(password: string, stored: string): Promise<
   });
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
+
+/** Política mínima de senha. Retorna a mensagem de erro ou null. */
+export function validatePassword(password: string, email?: string): string | null {
+  if (password.length < 10) return "A senha deve ter pelo menos 10 caracteres.";
+  if (password.length > 200) return "A senha deve ter no máximo 200 caracteres.";
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password))
+    return "A senha deve ter letras e números.";
+  if (email && password.toLowerCase().includes(email.split("@")[0]!.toLowerCase()))
+    return "A senha não pode conter o seu e-mail.";
+  return null;
+}
+
+/** Senha temporária legível (sem caracteres ambíguos), usada em criação e redefinição. */
+export function generateTempPassword(length = 14): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = randomBytes(length);
+  let out = "";
+  for (let i = 0; i < length; i++) out += alphabet[bytes[i]! % alphabet.length];
+  // Garante ao menos um dígito (política de senha).
+  return /[0-9]/.test(out) ? out : out.slice(0, -1) + "7";
+}

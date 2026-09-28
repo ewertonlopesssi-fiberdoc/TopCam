@@ -45,6 +45,7 @@ beforeAll(async () => {
     MEDIA_HOOK_SECRET: SECRET,
     MEDIA_READ_PASSWORD: READ_PASS,
     STREAM_KEY_ENC_KEY: db.encKeyB64,
+    JWT_SECRET: randomBytes(32).toString("hex"),
     LOG_LEVEL: "silent",
   });
   app = await buildApp({ env, pool, redis, mediamtx: fakeMediaMtx });

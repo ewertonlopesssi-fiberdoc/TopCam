@@ -3,24 +3,16 @@ import { parseArgs } from "node:util";
 import {
   PLATFORM,
   createPool,
-  enqueueJob,
   findCameraByCode,
   insertAudit,
   insertCameraEvent,
-  transitionCamera,
+  rotateStreamKey,
   withScope,
 } from "@topcam/db";
-import {
-  decryptStreamKey,
-  encryptStreamKey,
-  generateStreamKey,
-  hashStreamKey,
-  parseEncryptionKey,
-  streamKeyPrefix,
-} from "@topcam/shared";
+import { decryptStreamKey, parseEncryptionKey, streamKeyPrefix } from "@topcam/shared";
 
 /**
- * CLI administrativa (Fase 1 — as telas chegam na Fase 2).
+ * CLI administrativa (as mesmas operações existem no painel a partir da Fase 2).
  *
  *   camera:list      [--tenant <slug>]
  *   camera:show-key  --tenant <slug> --code <CAM-001> [--raw]
@@ -115,17 +107,8 @@ async function main() {
         });
         return decryptStreamKey(camera.stream_key_enc, encKey);
       }
-      const newKey = generateStreamKey();
-      await c.query(
-        `UPDATE cameras SET stream_key_hash = $2, stream_key_enc = $3, stream_key_prefix = $4,
-                stream_key_rotated_at = now() WHERE id = $1`,
-        [
-          camera.id,
-          hashStreamKey(newKey),
-          encryptStreamKey(newKey, encKey),
-          streamKeyPrefix(newKey),
-        ],
-      );
+      // Gera a chave nova, encerra a sessão da chave antiga e agenda a reconciliação.
+      const newKey = await rotateStreamKey(c, camera.id, encKey);
       await insertAudit(c, {
         tenantId: camera.tenant_id,
         actorType: "cli",
@@ -134,9 +117,6 @@ async function main() {
         entityId: camera.id,
         data: { code, new_prefix: streamKeyPrefix(newKey) },
       });
-      // A sessão aberta com a chave antiga deixa de valer (será desconectada pelo
-      // reconciliador); a câmera fica offline até publicar com a chave nova.
-      await transitionCamera(c, camera.id, "stream_offline", "key_rotated");
       await insertCameraEvent(c, {
         tenantId: camera.tenant_id,
         cameraId: camera.id,
@@ -144,13 +124,6 @@ async function main() {
         severity: "warning",
         message: `Chave de transmissão de ${code} foi trocada; a chave anterior deixou de valer`,
       });
-      // O reconciliador remove o caminho antigo e desconecta quem ainda usa a chave anterior.
-      await enqueueJob(
-        c,
-        "mediamtx.reconcile",
-        { reason: "key_rotated" },
-        { dedupKey: "reconcile" },
-      );
       return newKey;
     });
     printKey(tenant, code, key, values.raw ?? false);

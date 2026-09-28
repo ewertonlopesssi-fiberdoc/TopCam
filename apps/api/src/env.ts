@@ -20,6 +20,19 @@ const schema = z.object({
   PUBLISH_ACTIVE_WINDOW_S: z.coerce.number().positive().default(12),
   /** Janela de supressão de eventos repetidos de chave inválida (segundos). */
   AUTH_REJECT_EVENT_WINDOW_S: z.coerce.number().int().positive().default(60),
+
+  // ---- autenticação do painel/app (Fase 2)
+  /** Segredo HMAC dos tokens de acesso (JWT HS256). */
+  JWT_SECRET: z.string().min(32),
+  ACCESS_TOKEN_TTL_S: z.coerce.number().int().positive().default(900),
+  REFRESH_TOKEN_TTL_H: z.coerce.number().int().positive().default(720),
+  /** Cookie do refresh token só por HTTPS. Desligado no laboratório (HTTP); ligar na Fase 8. */
+  COOKIE_SECURE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  LOGIN_WINDOW_S: z.coerce.number().int().positive().default(900),
 });
 
 export type Env = z.infer<typeof schema>;

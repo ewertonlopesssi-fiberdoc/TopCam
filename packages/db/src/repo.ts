@@ -1,5 +1,9 @@
 import {
+  encryptStreamKey,
+  generateStreamKey,
+  hashStreamKey,
   nextCameraStatus,
+  streamKeyPrefix,
   type CameraEventType,
   type CameraStateEvent,
   type CameraStatus,
@@ -149,11 +153,13 @@ export async function insertAudit(
     entityType?: string;
     entityId?: string;
     data?: Record<string, unknown>;
+    ip?: string | null;
+    userAgent?: string | null;
   },
 ): Promise<void> {
   await client.query(
-    `INSERT INTO audit_logs (tenant_id, actor_user_id, actor_type, action, entity_type, entity_id, data)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    `INSERT INTO audit_logs (tenant_id, actor_user_id, actor_type, action, entity_type, entity_id, data, ip, user_agent)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
       a.tenantId,
       a.actorUserId ?? null,
@@ -162,8 +168,47 @@ export async function insertAudit(
       a.entityType ?? null,
       a.entityId ?? null,
       JSON.stringify(a.data ?? {}),
+      normalizeIp(a.ip),
+      a.userAgent ? a.userAgent.slice(0, 300) : null,
     ],
   );
+}
+
+/**
+ * Gera e grava uma nova chave RTMP para a câmera (a anterior deixa de valer),
+ * encerra o estado de transmissão e agenda a reconciliação do servidor de mídia,
+ * que desconecta quem ainda usa a chave antiga. Retorna a chave nova em claro.
+ */
+export async function rotateStreamKey(
+  client: PoolClient,
+  cameraId: string,
+  encKey: Buffer,
+): Promise<string> {
+  const key = generateStreamKey();
+  await client.query(
+    `UPDATE cameras SET stream_key_hash = $2, stream_key_enc = $3, stream_key_prefix = $4,
+            stream_key_rotated_at = now() WHERE id = $1`,
+    [cameraId, hashStreamKey(key), encryptStreamKey(key, encKey), streamKeyPrefix(key)],
+  );
+  await transitionCamera(client, cameraId, "stream_offline", "key_rotated");
+  await enqueueJob(
+    client,
+    "mediamtx.reconcile",
+    { reason: "key_rotated" },
+    { dedupKey: "reconcile" },
+  );
+  return key;
+}
+
+/** Próximo código CAM-### do cliente (bloqueia o cliente para evitar códigos repetidos). */
+export async function nextCameraCode(client: PoolClient, tenantId: string): Promise<string> {
+  await client.query("SELECT 1 FROM tenants WHERE id = $1 FOR UPDATE", [tenantId]);
+  const { rows } = await client.query<{ n: number | null }>(
+    `SELECT max(substring(code FROM '^CAM-([0-9]+)$')::int) AS n FROM cameras WHERE tenant_id = $1`,
+    [tenantId],
+  );
+  const n = (rows[0]?.n ?? 0) + 1;
+  return `CAM-${String(n).padStart(3, "0")}`;
 }
 
 // ------------------------------------------------------------------ tarefas duráveis

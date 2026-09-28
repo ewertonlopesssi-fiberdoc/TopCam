@@ -9,10 +9,12 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
     "@topcam/db": "workspace:*",
     "@topcam/shared": "workspace:*",
     "fastify": "^5.12.5",
     "ioredis": "^5.8.0",
+    "jose": "^6.2.12",
     "pg": "^8.23.0",
     "zod": "^4.6.5"
   }

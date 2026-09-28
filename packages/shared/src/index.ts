@@ -4,3 +4,4 @@ export * from "./media-path.js";
 export * from "./events.js";
 export * from "./password.js";
 export * from "./mediamtx-client.js";
+export * from "./permissions.js";
