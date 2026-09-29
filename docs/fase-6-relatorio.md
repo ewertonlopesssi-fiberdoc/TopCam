@@ -6,7 +6,7 @@
 - **131 testes automatizados** aprovados;
 - **E2E das telas Armazenamento e Servidores** aprovado em 1440, 768 e 390 px.
 
-Ainda falta rodar na VM (procedimento no fim).
+**VM (29/09, 12:46): 11/11**, com 131/131 testes (commit `3c7c424`). Disco de vídeo real a 29,9%, escrita a 3 ms. Houve **2 alertas de disco lento** nos primeiros ~20 min depois da atualização: as travadas do armazenamento do Proxmox continuam. Nenhum quadro perdido dentro dos segmentos, graças à fila de 8192 do gravador.
 
 ## Decisões suas nesta fase
 
@@ -78,7 +78,7 @@ Evidência: `docs/evidencias/aceite-fase6-20260929.md`. O aceite **não enche o 
 
 | Item | Como validar |
 |---|---|
-| VM | `scripts/accept-phase6.sh` (abaixo), ~15 min, deve dar 11/11 |
+| VM | ✅ 11/11 em 29/09 às 12:46 |
 | Disco de vídeo real a 95% | Não enchemos o disco de 35 GB de propósito. O aceite prova a mesma lógica com a cota do disco de teste |
 | Travadas do Proxmox | Depois de atualizar, veja na tela Armazenamento a latência máxima em 24 h e os alertas de disco lento; na tela Servidores, a espera por disco |
 
