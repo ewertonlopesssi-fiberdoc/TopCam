@@ -1,7 +1,7 @@
 # TopCam — Plano de execução e Fase 1
 
 > Versão 1.1 · 26/09/2026 · Nome do sistema e do repositório: **TopCam** (antes VigiaTop) · Base: `especificacao-tecnica.md` + `instrucoes-do-projeto.md` + imagem de referência (6 telas).
-> Status: plano aprovado em 26/09/2026. **Fase 1 concluída** (aceite 11/11 na VM). **Fase 2 concluída** (aceite 12/12 na VM; E2E 10/10). **Fase 3 entregue** (aceite 10/10 e E2E no ambiente de desenvolvimento; aguardando validação na VM e aprovação). Veja `fase-1-relatorio.md`, `fase-2-relatorio.md` e `fase-3-relatorio.md`. Próxima: Fase 4.
+> Status: plano aprovado em 26/09/2026. **Fase 1 concluída** (aceite 11/11 na VM). **Fase 2 concluída** (aceite 12/12 na VM; E2E 10/10). **Fase 3 concluída** (aceite 10/10 na VM; E2E; TWG 6608 validada). Veja `fase-1-relatorio.md`, `fase-2-relatorio.md` e `fase-3-relatorio.md`. Próxima: Fase 4.
 
 ---
 
@@ -148,7 +148,7 @@ As versões serão fixadas no lockfile e nas tags de imagem ao implementar a Fas
 
 | # | Assunto | Situação / risco | Recomendação | Bloqueia |
 |---|---|---|---|---|
-| D1 | **TWG 6608: RTMP e codec** | Sem confirmação de RTMP push, formato dos campos (URL + chave ou URL única), codec (H.264/H.265), áudio (AAC/G.711) e bitrate | Você verifica na interface da câmera. Depois da Fase 1, eu forneço um procedimento de teste com o MediaMTX e ffprobe que mostra exatamente o que a câmera envia | Fase 3 (validação com câmera real) |
+| D1 | **TWG 6608: RTMP e codec** | ✅ **Resolvida (28/09/2026):** RTMP push com URL única (Rede › Serviço de rede); H.264 1080p 15 fps, AAC; recebida e exibida em WebRTC e HLS | Configuração recomendada: CBR ~1,75 Mbps, I Frame 2 s (≈20,5 GB/24 h) | Fase 3 |
 | D2 | **H.265 e áudio no navegador** | H.265 via HLS toca no Safari e no Chrome com aceleração, mas não no Firefox. G.711 dentro de RTMP não é padrão e não toca no navegador | Piloto em **H.264 + AAC (ou sem áudio)**. H.265 fica suportado na gravação, com aviso de compatibilidade no player | Fase 3 |
 | D3 | **Disco** | ✅ **Decidido (26/09/2026):** VM nova com **2 discos**: 25 GB para o sistema e 35 GB só para vídeo. 24 h a 2 Mbps ≈ 23,5 GB (≈ 67% do disco de vídeo, abaixo do alerta de 70%) | Disco de vídeo montado em `/srv/topcam/recordings`. Se o vídeo encher, só a gravação para | — |
 | D4 | **Domínio, IP público e TLS** | Precisa de hostname estável, portas 443 e 1935 (e 1936 para RTMPS) e certificado | Hostname definitivo desde já (ex.: `video.seudominio.com.br`), Let's Encrypt via Caddy. No início, o lab pode rodar sem TLS na rede interna | Fase 8 (HTTPS obrigatório antes de acesso externo) |
@@ -170,7 +170,7 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
 |---|---|---|
 | **1. Fundação + ingestão RTMP autenticada** ✅ | Monorepo, Compose, modelo de dados completo + RLS, seed, API de health e hooks, transmissor de teste | Ver seção 7. **Concluída: 11/11** |
 | **2. Autenticação, multiempresa e cadastros + base visual** ✅ | Login (JWT + refresh), papéis, permissões por câmera, auditoria. Telas Clientes, Usuários, Grupos/Locais, Câmeras (cadastro individual, gerar/rotacionar/exibir chave), Configurações, com layout da referência (menu lateral, cabeçalho, cores) responsivo | Dois clientes fictícios isolados; viewer só vê câmeras permitidas; toda alteração aparece na auditoria; telas conferidas em 1440 px, 768 px e 390 px. **Concluída: 12/12 na VM + E2E** |
-| **3. Ao vivo** 🟡 | Gateway com token assinado, HLS (+ WebRTC/WHEP), tela Ao Vivo com mosaico 1/4/9/16, árvore Empresa › Local › Grupo, tela cheia | 5 câmeras simuladas ao vivo; token expirado/de outro usuário = 403; chave nunca aparece no navegador; latência medida e registrada; **validação da TWG 6608 (D1)**. **Entregue: aceite 10/10 + E2E (WebRTC 0,09 s e HLS 1,6 s no laboratório); falta validar na VM e com a TWG 6608** |
+| **3. Ao vivo** ✅ | Gateway com token assinado, HLS (+ WebRTC/WHEP), tela Ao Vivo com mosaico 1/4/9/16, árvore Empresa › Local › Grupo, tela cheia | 5 câmeras simuladas ao vivo; token expirado/de outro usuário = 403; chave nunca aparece no navegador; latência medida e registrada; **validação da TWG 6608 (D1)**. **Concluída: 10/10 na VM + E2E; TWG 6608 validada em RTMP/H.264, latência < ~1 s** |
 | **4. Gravação e retenção** | Gravação só da CAM-001, verificação e indexação de segmentos, estado "gravando", lacunas, retenção de 24 h, reconciliador | CAM-001 com segmentos contínuos; CAM-002..005 com **zero** arquivos e zero registros; expurgo comprovado (retenção reduzida no teste + execução de 24 h real); queda gera lacuna e evento |
 | **5. Gravações: reprodução e linha do tempo** | Tela Gravações: calendário, timeline com lacunas, player, velocidade, exportação MP4 autorizada e auditada | Reproduzir trecho escolhido; exportar MP4 válido (ffprobe); usuário sem `pode_exportar` = 403; exportação na auditoria |
 | **6. Armazenamento e proteção de disco** | Quota de vídeo, alertas 70/85/95%, parada controlada da gravação, tela Armazenamento e Servidores | Encher o volume de teste até 95%: gravação para com evento e alerta, banco e sistema seguem funcionando; retomada automática ao liberar espaço |

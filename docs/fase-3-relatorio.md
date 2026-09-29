@@ -6,7 +6,9 @@
 - **E2E: 12/12**, incluindo os 2 testes novos do ao vivo, com as 5 câmeras transmitindo;
 - **85 testes automatizados**.
 
-Ainda falta validar na VM de laboratório e com a TWG 6608 (procedimentos no fim).
+**Na VM de laboratório (28/09/2026, commit `8bfa7b0`): aceite 10/10**, com os 85 testes aprovados.
+
+A **câmera TWG 6608 foi validada** com a câmera real (dúvida D1 fechada; detalhes abaixo).
 
 ## Ajustes aprovados junto com a fase
 
@@ -63,6 +65,19 @@ Evidências:
 
 **A latência foi medida no laboratório:** transmissor, servidor e navegador rodaram na mesma máquina, sem rede entre eles. Com a câmera real e a rede de vocês, some a latência do codificador da câmera e da rede. Isso se mede com o cronômetro (procedimento abaixo).
 
+## Validação da câmera TWG 6608 (D1 fechada)
+
+| Item | Resultado |
+|---|---|
+| Envio | **RTMP push** com campo único de URL (Rede › Serviço de rede): basta marcar Habilitar e colar a **URL completa** do cadastro (`rtmp://172.31.141.20:1935/live/<chave>`) |
+| Codificação usada (MainStream) | H.264, 1080p (1920x1080), 15 fps, **CBR 1.755 kbps**, I Frame Interval 2, áudio **AAC** 8 kHz. A câmera também oferece H.265/H.265+ e 720p |
+| Recebido pelo TopCam | H264 1920x1080 @ 15 fps, áudio aac, **1,9 Mbps** medidos, status Online |
+| Espaço estimado em 24 h | ~20,5 GB (≈59% do disco de vídeo de 35 GB, abaixo do alerta de 70%) |
+| Ao vivo | Toca em **WebRTC** e em **HLS** no painel |
+| Latência | Na virada do minuto, sem diferença visível em segundos para o cronômetro, nos dois modos: **abaixo de cerca de 1 s** |
+| Áudio | AAC toca no HLS. No WebRTC o vídeo chega sem som, porque o WebRTC do navegador não aceita AAC |
+| Cadastro | Condomínio Sol › Bloco A › Portaria, **CAM-001 "Portão Social"**, com gravação contínua de 24 h. É a câmera gravada da Fase 4. A gravação da CAM-001 da Empresa Alfa (teste) foi desmarcada pelo Ewe |
+
 ## Problemas encontrados e corrigidos durante a fase
 
 1. **Ordem das diretivas do Caddy.** Sem um bloco `route`, o `rewrite` rodava antes do `forward_auth`.
@@ -89,10 +104,10 @@ Evidências:
 
 | Item | Situação | Como validar |
 |---|---|---|
-| VM Debian no Proxmox | Não executado | Procedimento abaixo: `accept-phase3.sh` deve dar 10/10 |
-| WebRTC entre o seu computador e a VM | Aqui, navegador e servidor estão na mesma máquina | Abrir o Ao Vivo em `http://172.31.141.20`: o rodapé do vídeo deve mostrar **WebRTC**. Se mostrar HLS, a porta 8189 (UDP/TCP) não está chegando |
+| VM Debian no Proxmox | ✅ **10/10 em 28/09/2026** (PUBLIC_HOST 172.31.141.20). WebRTC anunciado em 172.31.141.20:8189; borda do HLS a 0,19 s; MediaMTX a ~31% de CPU (1 núcleo) recebendo 5 câmeras de teste mais a TWG 6608 em 1080p | — |
+| WebRTC entre o computador e a VM | ✅ Painel em `http://172.31.141.20`: a TWG 6608 tocou em **WebRTC** e, trocando o modo, em **HLS** | — |
 | Navegadores | Só Google Chrome (headless). O Chromium do Playwright não tem H.264 | Chrome, Edge, Firefox e celular (Android e iPhone) |
-| TWG 6608 e latência real | Sem acesso à câmera | `docs/procedimento-teste-twg6608.md`, itens 1 a 5 (inclui a medida com cronômetro) |
+| TWG 6608 e latência real | ✅ Validada (ver seção abaixo). A latência foi comparada com um cronômetro só na resolução de segundos | Opcional: um print com os milésimos dá o número exato |
 | Muitos espectadores ao mesmo tempo | Medido só com 1 navegador e 5 câmeras | Fica para o teste de capacidade (Fase 10) |
 
 ## Pendências e observações
