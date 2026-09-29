@@ -27,6 +27,14 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Um aceite por vez: todos usam as câmeras de teste da Empresa Alfa, os mesmos
+# transmissores e o mesmo banco de testes. Dois ao mesmo tempo se atrapalham.
+exec 9>/tmp/topcam-aceite.lock
+if ! flock -n 9; then
+  echo "Já existe um teste de aceite em execução nesta máquina. Aguarde terminar (ps aux | grep accept-phase)." >&2
+  exit 3
+fi
+
 BUILD=1
 RUN_TESTS=1
 SKIP_RESTART=0

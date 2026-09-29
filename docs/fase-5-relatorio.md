@@ -51,6 +51,31 @@ O teste lê o relógio que o transmissor desenha em cada quadro e compara com o 
 | Visualizador | sem "pode reproduzir" vê o aviso; com ela reproduz e o botão Baixar MP4 não aparece; exportação pela API → 403 |
 | Layout | computador, tablet e celular sem rolagem horizontal (`reports/screens/gravacoes-*.png`) |
 
+### Primeira execução na VM (29/09, 06:50)
+
+Duas execuções do aceite rodaram ao mesmo tempo, iniciadas às 06:50:03 e às 06:51:18, e uma atrapalhou a outra:
+
+- a segunda reiniciou o transmissor da CAM-001 no meio da primeira;
+- as duas baterias de testes disputaram o mesmo papel do banco.
+
+Resultados: **6/8** e **7/8**.
+
+- **G1–G5 e G7 passaram nas duas.**
+- **G6:** o arquivo de 115 s (para 120 s pedidos) estava certo. O trecho continha o buraco de 5 s criado pela outra execução, e a API emendou os 2 blocos (auditoria: `parts: 2`, `recorded_seconds: 115`).
+- **G8:** `tuple concurrently updated` ao alterar o papel `topcam_app`, que é único no servidor.
+
+Correções:
+
+1. **Trava contra execução dupla** (`flock`) nos aceites das Fases 3, 4 e 5: um segundo aceite recusa rodar (saída 3).
+2. **G6** confere a duração do arquivo contra o tempo **gravado** no trecho, e o trecho termina dentro de um bloco já conferido.
+3. **Testes:** a criação e a alteração do papel `topcam_app` ficam atrás de uma trava do Postgres.
+
+Conferido no ambiente de desenvolvimento:
+
+- duas baterias simultâneas: nenhuma disputa do papel. Sobraram 3 falhas de contadores de login no Redis compartilhado, que só existem com duas baterias juntas, e a trava impede isso;
+- uma bateria: 112/112;
+- aceite: 8/8.
+
 ## Problemas encontrados e corrigidos durante a fase
 
 1. **O servidor de reprodução para na primeira lacuna.** Uma exportação de 150 s com uma queda no meio devolvia só os 60 s antes da queda, sem nenhum aviso.
@@ -91,7 +116,7 @@ O teste lê o relógio que o transmissor desenha em cada quadro e compara com o 
 cd /opt/topcam
 nohup scripts/update.sh --bundle /root/topcam-fase5.bundle > /root/update5.log 2>&1 &
 tail -f /root/update5.log                               # até "tudo saudável"
-nohup scripts/accept-phase5.sh --no-build > /root/aceite5.log 2>&1 &
+nohup scripts/accept-phase5.sh --no-build > /root/aceite5.log 2>&1 &   # rode UMA vez só
 tail -f /root/aceite5.log                               # ~10 min; deve dar 8/8
 git push
 ```

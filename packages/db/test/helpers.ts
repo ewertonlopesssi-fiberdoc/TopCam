@@ -29,6 +29,8 @@ function withDatabase(url: string, db: string): string {
   return u.toString();
 }
 
+const ROLE_LOCK_KEY = 7_311_004;
+
 export async function createTestDb(opts: { seedDemo?: boolean } = {}): Promise<TestDb> {
   const name = `topcam_test_${randomBytes(4).toString("hex")}`;
   const admin = new pg.Client({ connectionString: ADMIN_URL });
@@ -37,8 +39,19 @@ export async function createTestDb(opts: { seedDemo?: boolean } = {}): Promise<T
   await admin.end();
 
   const ownerUrl = withDatabase(ADMIN_URL, name);
-  await migrate(ownerUrl);
-  await setAppRolePassword(ownerUrl, APP_PASSWORD);
+  // O papel topcam_app é do servidor inteiro, não do banco: com os arquivos de teste
+  // em paralelo, criar/alterar o papel ao mesmo tempo dá "tuple concurrently updated".
+  // Uma trava no banco "postgres" (comum a todos) faz essa etapa um de cada vez.
+  const lock = new pg.Client({ connectionString: ADMIN_URL });
+  await lock.connect();
+  try {
+    await lock.query("SELECT pg_advisory_lock($1)", [ROLE_LOCK_KEY]);
+    await migrate(ownerUrl);
+    await setAppRolePassword(ownerUrl, APP_PASSWORD);
+  } finally {
+    await lock.query("SELECT pg_advisory_unlock($1)", [ROLE_LOCK_KEY]).catch(() => undefined);
+    await lock.end();
+  }
   const encKeyB64 = randomBytes(32).toString("base64");
   if (opts.seedDemo !== false) {
     await seed(ownerUrl, {

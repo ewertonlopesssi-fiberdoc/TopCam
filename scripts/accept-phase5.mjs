@@ -249,8 +249,11 @@ async function check() {
 
   // ------------------------------------------------------------ G6: exportação MP4 auditada
   await grant([{ cameraId: CAM1, canLive: true, canPlayback: true }]);
+  // Trecho de até 2 min dentro de um bloco já conferido (a linha do tempo só traz
+  // segmentos conferidos), com folga de 5 s nas duas pontas.
   const eStart = span ? span.from + 5_000 : Date.now() - 180_000;
-  const body = { start: iso(eStart), end: iso(eStart + 120_000) };
+  const eEnd = span ? Math.min(eStart + 120_000, span.to - 5_000) : eStart + 120_000;
+  const body = { start: iso(eStart), end: iso(eEnd) };
   const vDenied = await http("POST", `/api/v1/cameras/${CAM1}/exports`, { ...V, body });
   const tooLong = await http("POST", `/api/v1/cameras/${CAM1}/exports`, {
     ...A,
@@ -279,8 +282,9 @@ async function check() {
     ex.status === 200 &&
     dl.status === 200 &&
     pe.ok &&
-    Math.abs(pe.dur - 120) < 4 &&
-    /filename="CAM-001_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_2min\.mp4"/.test(disp) &&
+    ex.json.recordedSeconds >= 60 &&
+    Math.abs(pe.dur - ex.json.recordedSeconds) < 4 &&
+    /filename="CAM-001_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d+min\.mp4"/.test(disp) &&
     forged.status === 403 &&
     acts.includes("camera.export_requested") &&
     acts.includes("camera.exported");
@@ -289,7 +293,7 @@ async function check() {
     ok6,
     'Exportação MP4 só com "pode exportar", com limites, arquivo válido e registro na auditoria',
     `sem permissão ${vDenied.status}; acima do máximo ${tooLong.status}; futuro ${future.status}; sem gravação ${none.status}; ` +
-      `pedido ${ex.status}; download ${dl.status} ${(dl.buf.length / 1e6).toFixed(1)} MB ${pe.codecs.join("+")} ${pe.dur.toFixed(1)} s (pedido 120 s); ` +
+      `pedido ${ex.status}; download ${dl.status} ${(dl.buf.length / 1e6).toFixed(1)} MB ${pe.codecs.join("+")} ${pe.dur.toFixed(1)} s (pedido ${ex.json?.seconds ?? "?"} s, gravado ${ex.json?.recordedSeconds ?? "?"} s); ` +
       `${/filename="([^"]+)"/.exec(disp)?.[1] ?? "sem nome"}; link adulterado ${forged.status}; auditoria: ${[...new Set(acts)].join(", ") || "nada"}`,
   );
 

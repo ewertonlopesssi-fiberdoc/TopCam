@@ -4,8 +4,8 @@
  Container topcam-redis-1 Waiting 
  Container topcam-redis-1 Healthy 
  Container topcam-postgres-1 Healthy 
- Container topcam-tests-run-aeaef846b569 Creating 
- Container topcam-tests-run-aeaef846b569 Created 
+ Container topcam-tests-run-7f2522de9099 Creating 
+ Container topcam-tests-run-7f2522de9099 Created 
 
 > topcam@0.1.0 lint /app
 > eslint .
@@ -17,31 +17,31 @@
 
  RUN  v5.0.2 /app
 
- ✓ |unit| packages/shared/test/shared.unit.test.ts (17 tests) 107ms
+ ✓ |unit| packages/shared/test/shared.unit.test.ts (17 tests) 116ms
  ✓ |unit| apps/worker/test/worker.unit.test.ts (5 tests) 11ms
- ✓ |integration| apps/api/test/phase2.int.test.ts (19 tests) 5666ms
+ ✓ |integration| apps/api/test/phase2.int.test.ts (19 tests) 7678ms
    ✓ autenticação (6)
-     ✓ bloqueia após 5 tentativas erradas no mesmo e-mail 651ms
-     ✓ primeiro acesso exige troca de senha antes de usar a API 641ms
+     ✓ bloqueia após 5 tentativas erradas no mesmo e-mail 560ms
+     ✓ primeiro acesso exige troca de senha antes de usar a API 563ms
    ✓ cadastros, papéis e isolamento (13)
-     ✓ administrador cria usuários do cliente com senha temporária 674ms
-     ✓ administrador do cliente só gerencia o próprio cliente 673ms
-     ✓ desativar usuário e suspender cliente cortam o acesso na hora 418ms
-     ✓ excluir usuário corta o acesso, some da lista e libera o e-mail 764ms
- ✓ |integration| apps/api/test/phase5.int.test.ts (8 tests) 2517ms
- ✓ |integration| apps/worker/test/worker.int.test.ts (13 tests) 2721ms
+     ✓ administrador cria usuários do cliente com senha temporária 805ms
+     ✓ administrador do cliente só gerencia o próprio cliente 679ms
+     ✓ desativar usuário e suspender cliente cortam o acesso na hora 387ms
+     ✓ excluir usuário corta o acesso, some da lista e libera o e-mail 735ms
+ ✓ |integration| apps/api/test/phase5.int.test.ts (8 tests) 9838ms
+ ✓ |integration| apps/worker/test/worker.int.test.ts (13 tests) 2789ms
    ✓ poller de status (5)
      ✓ recupera câmera transmitindo, detecta vídeo parado e queda 1394ms
- ✓ |integration| apps/api/test/phase3.int.test.ts (10 tests) 2150ms
- ✓ |integration| apps/worker/test/recordings.int.test.ts (10 tests) 1932ms
- ✓ |integration| apps/api/test/phase4.int.test.ts (6 tests) 2161ms
+ ✓ |integration| apps/api/test/phase3.int.test.ts (10 tests) 2346ms
+ ✓ |integration| apps/worker/test/recordings.int.test.ts (10 tests) 2068ms
+ ✓ |integration| apps/api/test/phase4.int.test.ts (6 tests) 2400ms
    ✓ resumo e linha do tempo (2)
-     ✓ mostram só segmentos conferidos, com lacunas; exigem permissão de reprodução 747ms
- ✓ |integration| apps/api/test/api.int.test.ts (13 tests) 1244ms
- ✓ |integration| packages/db/test/db.int.test.ts (11 tests) 944ms
+     ✓ mostram só segmentos conferidos, com lacunas; exigem permissão de reprodução 758ms
+ ✓ |integration| apps/api/test/api.int.test.ts (13 tests) 1230ms
+ ✓ |integration| packages/db/test/db.int.test.ts (11 tests) 1087ms
 
  Test Files  10 passed (10)
       Tests  112 passed (112)
-   Start at  03:59:33
-   Duration  24.92s (tests 84%, import 12%, transform 4%)
+   Start at  10:55:36
+   Duration  36.17s (tests 86%, import 9%, transform 5%)
 
