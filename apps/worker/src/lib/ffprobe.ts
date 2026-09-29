@@ -62,7 +62,13 @@ function execJson(args: string[], timeoutS: number): Promise<unknown> {
       { timeout: timeoutS * 1000, maxBuffer: 8 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
-          const e = new Error(`ffprobe falhou: ${(stderr || err.message).trim().slice(0, 500)}`);
+          // Tempo esgotado costuma indicar disco travado (latência alta no armazenamento):
+          // a mensagem diz isso claramente para o diagnóstico nos logs.
+          const e = new Error(
+            err.killed
+              ? `ffprobe: tempo esgotado (${timeoutS} s) — disco lento ou travado?`
+              : `ffprobe falhou: ${(stderr || err.message).trim().slice(0, 500)}`,
+          );
           // Tempo esgotado é falha transitória (tenta de novo); o resto é arquivo inválido.
           (e as Error & { transient?: boolean }).transient = Boolean(err.killed);
           reject(e);

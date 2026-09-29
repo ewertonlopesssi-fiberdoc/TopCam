@@ -20,6 +20,11 @@ logLevel: info
 logDestinations: [stdout]
 readTimeout: 10s
 writeTimeout: 10s
+# Fila de saída de cada leitor (gravação, HLS, WebRTC), em quadros. O padrão (512)
+# dura ~8–20 s: se o disco travar mais que isso, o gravador descarta quadros e o
+# vídeo fica com buraco. 8192 aguenta ~6 min numa câmera de 15 fps com AAC 8 kHz
+# (~2 min a 30 fps com áudio 48 kHz). A memória só é usada durante a travada.
+writeQueueSize: 8192
 
 authMethod: http
 authHTTPAddress: http://api:3000/internal/mediamtx/auth

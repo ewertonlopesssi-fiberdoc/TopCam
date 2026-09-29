@@ -76,6 +76,43 @@ Conferido no ambiente de desenvolvimento:
 - uma bateria: 112/112;
 - aceite: 8/8.
 
+### Aceite na VM (29/09, 08:16): **8/8**, 112/112 testes
+
+Rodado uma vez só, com a trava contra execução dupla. G6: MP4 de 120,0 s, com 122 s gravados. G7: 120 s gravados de 200 s pedidos, arquivo de 120,7 s. Push `ae84387`.
+
+### Investigação: lacunas da TWG e travadas de disco no host
+
+Na VM apareceram de 1 a 5 lacunas de 3 a 10 s por hora na TWG, sem queda de conexão. O servidor de mídia registrava `reader is too slow, discarding N frames` seguido de `too many reordered frames`.
+
+| Onde | Evidência |
+|---|---|
+| VM | Pressão de IO `full avg300` de 9,8%; `w_await` médio desde o boot de 569 ms (sistema) e 206 ms (vídeo), com o normal abaixo de 3 ms; ffprobe estourando 30 s; `docker rm` levando 70 s |
+| Host Proxmox | IO delay com picos de 30 a 45%, junto com o pico de escrita da VM 101 (CDNTV-EDGE, 3 a 10 MB/s contínuos) |
+| Armazenamento | `local-lvm` em 2× **Kingston A400 480 GB**: SSD de entrada, sem DRAM, atrás da PERC H700, sem TRIM. É compartilhado pelo TopCam e pela CDNTV-EDGE |
+
+**Causa:** a escrita contínua da CDN satura os A400, e todas as VMs do `local-lvm` travam. O EDGE também sofre, e há relatos de travamento no conteúdo dele.
+
+**Providências:**
+
+1. **Suporte do EDGE:** vai aumentar o cache em memória para reduzir a escrita em disco.
+2. **Recomendado:** trocar os A400 por SSDs de datacenter.
+3. **Atenção:** o `HD18-TB` (1× WD Purple 18 TB, disco único) está 99% cheio.
+
+**Proteção no TopCam (aprovada):** `writeQueueSize: 8192` no servidor de mídia. Teste aqui, com o disco de gravação congelado por 45 s (`fsfreeze`):
+
+| Fila | Quadros descartados | Vídeo no segmento da travada |
+|---|---|---|
+| 512 (padrão) | ~130 por segundo, depois de ~8 s | **buraco de 40,7 s dentro do segmento**, que o índice não vê (441 de ~1.050 quadros) |
+| **8192** | **nenhum** | 900 quadros por 60 s, sem buraco; memória do servidor de mídia ~52 MB |
+
+A fila de 8192 aguenta ~6 min numa câmera de 15 fps com AAC 8 kHz.
+
+**Observação:** com a fila pequena, o buraco pode ficar **dentro** do segmento, sem aparecer como lacuna. Então a perda real na VM pode ter sido maior que as lacunas registradas. A Fase 6 passa a detectar buracos internos na conferência dos segmentos.
+
+**Ajustes de diagnóstico (aprovados):**
+- o worker registra `ffprobe: tempo esgotado (30 s) — disco lento ou travado?` (teste novo; 113/113);
+- o aceite marca a queda só depois que o transmissor cai de fato.
+
 ## Problemas encontrados e corrigidos durante a fase
 
 1. **O servidor de reprodução para na primeira lacuna.** Uma exportação de 150 s com uma queda no meio devolvia só os 60 s antes da queda, sem nenhum aviso.

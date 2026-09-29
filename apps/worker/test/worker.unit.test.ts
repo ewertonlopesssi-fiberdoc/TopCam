@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { redact } from "../src/context.js";
 import { summarizeProbe } from "../src/jobs/probe.js";
 import { diffPathConfs, type DesiredPath } from "../src/jobs/reconcile.js";
-import { parseFrameRate } from "../src/lib/ffprobe.js";
+import { execFileSync } from "node:child_process";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseFrameRate, probeFile } from "../src/lib/ffprobe.js";
 
 const KEY = "A".repeat(40);
 
@@ -72,5 +76,21 @@ describe("validação do stream", () => {
     const out = redact(msg);
     expect(out).not.toContain(KEY);
     expect(out).not.toContain("segredo");
+  });
+});
+
+describe("conferência de segmento: ffprobe", () => {
+  it("tempo esgotado vira falha passageira com mensagem clara (disco travado)", async () => {
+    // Um FIFO sem quem escreva deixa o ffprobe bloqueado, como num disco travado.
+    const fifo = join(tmpdir(), `topcam-fifo-${process.pid}.mp4`);
+    execFileSync("mkfifo", [fifo]);
+    try {
+      const err = await probeFile(fifo, 1).catch((e: Error & { transient?: boolean }) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("tempo esgotado (1 s)");
+      expect((err as { transient?: boolean }).transient).toBe(true);
+    } finally {
+      rmSync(fifo, { force: true });
+    }
   });
 });

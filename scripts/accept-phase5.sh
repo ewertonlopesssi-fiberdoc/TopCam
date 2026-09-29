@@ -163,8 +163,10 @@ log "preparação: aguardando 3 segmentos conferidos"
 wait_until 240 enough
 
 log "preparação: queda de 30 s na CAM-001 (lacuna)"
-GAP_AT=$(( $(date +%s%3N) ))
 stop_tx
+# Marca a queda só depois que o transmissor caiu de fato (em VM lenta o docker pode
+# levar dezenas de segundos para remover o contêiner).
+GAP_AT=$(( $(date +%s%3N) ))
 sleep 30
 start_tx
 after_gap() { [ "$(sql "SELECT count(*) FROM recording_segments WHERE camera_id = '$CAM1' AND state = 'verified' AND started_at > to_timestamp($GAP_AT / 1000.0)")" -ge 2 ]; }
