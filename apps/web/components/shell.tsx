@@ -26,6 +26,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { initials } from "@/lib/format";
 
@@ -67,7 +68,7 @@ export const NAV: NavItem[] = [
     href: "/relatorios",
     label: "Relatórios",
     icon: FileBarChart,
-    show: (a) => a.can("audit.read"),
+    show: (a) => a.can("reports.read"),
   },
   { href: "/auditoria", label: "Auditoria", icon: ClipboardList, show: (a) => a.can("audit.read") },
   { href: "/configuracoes", label: "Configurações", icon: Cog, show: () => true },
@@ -128,11 +129,38 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+/** Alertas ativos visíveis ao usuário (sino). Atualiza a cada 30 s. */
+function useAlertCount() {
+  const [v, setV] = useState({ total: 0, urgent: false });
+  useEffect(() => {
+    let stop = false;
+    const load = () =>
+      api
+        .get<{ total: number; bySeverity: Record<string, number> }>("/alerts/summary")
+        .then((r) => {
+          if (!stop)
+            setV({
+              total: r.total,
+              urgent: (r.bySeverity.critical ?? 0) + (r.bySeverity.error ?? 0) > 0,
+            });
+        })
+        .catch(() => {});
+    void load();
+    const t = setInterval(load, 30_000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, []);
+  return v;
+}
+
 function Header({ onMenu }: { onMenu: () => void }) {
   const { user, signOut } = useAuth();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const alerts = useAlertCount();
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-white/95 px-4 backdrop-blur sm:px-6">
       <button className="icon-btn lg:hidden" onClick={onMenu} aria-label="Abrir menu">
@@ -158,8 +186,22 @@ function Header({ onMenu }: { onMenu: () => void }) {
         />
       </form>
       <div className="ml-auto flex items-center gap-2">
-        <Link href="/eventos" className="icon-btn relative border-0" aria-label="Eventos e alertas">
+        <Link
+          href="/eventos"
+          className="icon-btn relative border-0"
+          aria-label={
+            alerts.total ? `Eventos e alertas: ${alerts.total} ativo(s)` : "Eventos e alertas"
+          }
+        >
           <Bell size={18} />
+          {alerts.total > 0 && (
+            <span
+              data-testid="alert-badge"
+              className={`absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white ${alerts.urgent ? "bg-red-600" : "bg-amber-500"}`}
+            >
+              {alerts.total > 99 ? "99+" : alerts.total}
+            </span>
+          )}
         </Link>
         <div className="relative">
           <button

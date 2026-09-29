@@ -24,6 +24,13 @@ import {
   verifySegmentJob,
 } from "./jobs/recordings.js";
 import { collectHostMetrics, newHostState } from "./jobs/host.js";
+import {
+  accumulateHourly,
+  checkCameraAlerts,
+  newMonitorState,
+  notifyAlerts,
+  sampleStatus,
+} from "./jobs/monitor.js";
 import { reconcileMediaServer } from "./jobs/reconcile.js";
 import { checkStorage, newStorageState } from "./jobs/storage.js";
 import { runFfprobe } from "./lib/ffprobe.js";
@@ -170,6 +177,21 @@ every(env.STORAGE_CHECK_INTERVAL_S, "storage", async () => {
 });
 const hostState = newHostState();
 every(env.HOST_METRICS_INTERVAL_S, "host-metrics", () => collectHostMetrics(ctx, hostState));
+
+// Monitoramento (Fase 7): alertas de câmera, disponibilidade, amostras e e-mail.
+const monitorState = newMonitorState();
+every(env.CAMERA_ALERTS_INTERVAL_S, "camera-alerts", async () => {
+  const r = await checkCameraAlerts(ctx);
+  if (r.opened || r.resolved) log.info(r, "alertas de câmera");
+});
+every(env.CAMERA_ALERTS_INTERVAL_S, "hourly", () =>
+  accumulateHourly(ctx, monitorState, Date.now(), env.CAMERA_ALERTS_INTERVAL_S),
+);
+every(env.STATUS_SAMPLE_INTERVAL_S, "status-samples", () => sampleStatus(ctx, monitorState));
+every(env.NOTIFY_INTERVAL_S, "notify", async () => {
+  const r = await notifyAlerts(ctx, monitorState);
+  if (r.sent || r.failed) log.info(r, "e-mails de alerta");
+});
 
 every(60, "housekeeping", async () => {
   const n = await withScope(pool, PLATFORM, (c) => recoverStaleJobs(c));

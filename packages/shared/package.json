@@ -14,5 +14,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "nodemailer": "^6.10.1"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^6.4.24"
   }
 }

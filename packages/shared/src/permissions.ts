@@ -40,6 +40,8 @@ export const PERMISSIONS = [
   "audit.read",
   "storage.read",
   "storage.write",
+  "alerts.write",
+  "reports.read",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -57,6 +59,8 @@ const MATRIX: Record<RoleKey, readonly Permission[]> = {
     "settings.read",
     "audit.read",
     "storage.read",
+    "alerts.write",
+    "reports.read",
   ],
   tenant_admin: [
     "tenants.read",
@@ -67,6 +71,8 @@ const MATRIX: Record<RoleKey, readonly Permission[]> = {
     "locations.read",
     "cameras.read",
     "audit.read",
+    "alerts.write",
+    "reports.read",
   ],
   operator: ["locations.read", "cameras.read"],
   viewer: ["locations.read", "cameras.read"],

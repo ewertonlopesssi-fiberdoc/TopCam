@@ -350,6 +350,7 @@ describe("métricas do servidor", () => {
       read: async (p) => files[p]!,
       measure: async () => ({ total: 100 * GB, free: 10 * GB }),
       fetchReady: async () => ({ checks: { database: "ok", redis: "ok", mediamtx: "fail" } }),
+      prom: async (q) => (q.includes("receive") ? 8_000_000 : 2_000_000),
     });
     expect(m).toMatchObject({
       cpus: 2,
@@ -357,7 +358,8 @@ describe("métricas do servidor", () => {
       mem_total: 8000000 * 1024,
       io_pressure: { full300: 9.78 },
       system_disk: { pct: 90 },
-      services: { worker: "ok", api: "ok", database: "ok", mediamtx: "fail" },
+      services: { worker: "ok", api: "ok", database: "ok", mediamtx: "fail", prometheus: "ok" },
+      network: { rx_bps: 8_000_000, tx_bps: 2_000_000 },
     });
     expect(await openAlerts()).toEqual(["system_disk:error"]);
     const [row] = await ownerQuery<{ metrics: { host: { system_disk: { pct: number } } } }>(

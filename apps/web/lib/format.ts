@@ -151,4 +151,66 @@ export const AUDIT_LABELS: Record<string, string> = {
   "storage.emergency_purge": "Limpeza de emergência (disco cheio)",
   "plan.updated": "Plano alterado",
   "settings.updated": "Configurações alteradas",
+  "integrations.smtp_updated": "Integração de e-mail alterada",
+  "integrations.smtp_tested": "E-mail de teste enviado",
+  "alert.acknowledged": "Alerta reconhecido",
+  "alert.resolved": "Alerta resolvido",
+};
+
+export const SEVERITY: Record<string, { label: string; tone: Tone }> = {
+  info: { label: "Informação", tone: "blue" },
+  warning: { label: "Atenção", tone: "amber" },
+  error: { label: "Erro", tone: "red" },
+  critical: { label: "Crítico", tone: "red" },
+};
+
+export const ALERT_STATUS: Record<string, { label: string; tone: Tone }> = {
+  open: { label: "Aberto", tone: "red" },
+  acknowledged: { label: "Reconhecido", tone: "amber" },
+  resolved: { label: "Resolvido", tone: "green" },
+};
+
+export const ALERT_RULES: Record<string, string> = {
+  camera_offline: "Câmera sem sinal",
+  recording_stalled: "Gravação parada",
+  storage_level: "Disco de vídeo",
+  storage_purge: "Limpeza de emergência",
+  storage_blocked: "Gravação bloqueada (disco)",
+  storage_slow: "Disco lento",
+  tenant_quota: "Cota do cliente",
+  system_disk: "Disco do sistema",
+};
+
+export const EVENT_LABELS: Record<string, string> = {
+  publish_authorized: "Transmissão autorizada",
+  auth_rejected: "Chave recusada",
+  publish_denied: "Transmissão negada",
+  duplicate_publish_rejected: "Transmissão duplicada recusada",
+  stream_online: "Câmera no ar",
+  stream_offline: "Câmera saiu do ar",
+  connect_timeout: "Tempo de conexão esgotado",
+  probe_started: "Análise do sinal iniciada",
+  codec_detected: "Codec detectado",
+  codec_warning: "Aviso de codec",
+  probe_failed: "Falha na análise do sinal",
+  key_rotated: "Chave trocada",
+  publisher_kicked: "Transmissor desconectado",
+  status_changed: "Status alterado",
+  ingest_unreachable: "Servidor de mídia inacessível",
+  ingest_recovered: "Servidor de mídia recuperado",
+  recording_started: "Gravação iniciada",
+  recording_stopped: "Gravação parada",
+  recording_stalled: "Gravação travada",
+  recording_gap: "Lacuna na gravação",
+  segment_corrupt: "Trecho corrompido",
+  segment_missing: "Trecho ausente",
+  unexpected_recording: "Gravação inesperada",
+  storage_level: "Nível do disco",
+  storage_purge: "Limpeza de emergência",
+  storage_recording_blocked: "Gravação bloqueada (disco)",
+  storage_recording_resumed: "Gravação retomada",
+  storage_slow: "Disco lento",
+  tenant_quota: "Cota do cliente",
+  system_disk: "Disco do sistema",
+  alert_notified: "Aviso enviado por e-mail",
 };

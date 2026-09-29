@@ -1,6 +1,7 @@
 "use client";
 
-import { Building2, Camera, CameraOff, Info, Users, Wifi } from "lucide-react";
+import { Building2, Camera, CameraOff, Users, Wifi } from "lucide-react";
+import { Monitor } from "@/components/dashboard-monitor";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/ui";
@@ -106,14 +107,7 @@ export default function DashboardPage() {
           );
         })}
       </div>
-      <div className="card mt-5 flex gap-3 p-4 text-sm text-slate-600">
-        <Info size={18} className="mt-0.5 shrink-0 text-brand-600" />
-        <p>
-          Gráficos de câmeras online/offline nas últimas 24 h, armazenamento, tráfego, gravações em
-          andamento e últimos eventos entram na Fase 7 (monitoramento). Os números acima já vêm do
-          sistema em tempo real.
-        </p>
-      </div>
+      <Monitor />
     </>
   );
 }

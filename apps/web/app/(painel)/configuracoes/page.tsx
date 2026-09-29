@@ -4,6 +4,7 @@ import { Loader2, Pencil } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ErrorBox, Field, Modal, PageHeader, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
+import { IntegrationsCard } from "@/components/integrations-card";
 import { useAuth } from "@/lib/auth";
 import { fmtBytes } from "@/lib/format";
 
@@ -424,6 +425,11 @@ export default function ConfiguracoesPage() {
           </div>
         )}
       </div>
+      {auth.can("settings.write") && (
+        <div className="mt-5">
+          <IntegrationsCard />
+        </div>
+      )}
       {auth.isPlatform && (
         <div className="mt-5">
           <PlansCard canEdit={auth.can("settings.write")} />

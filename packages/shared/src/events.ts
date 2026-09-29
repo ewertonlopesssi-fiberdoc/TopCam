@@ -32,6 +32,8 @@ export const CAMERA_EVENT_TYPES = [
   "storage_slow",
   "tenant_quota",
   "system_disk",
+  // alertas e notificações (Fase 7)
+  "alert_notified",
 ] as const;
 
 export type CameraEventType = (typeof CAMERA_EVENT_TYPES)[number];

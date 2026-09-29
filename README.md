@@ -4,7 +4,7 @@ Plataforma multiempresa de câmeras IP: recebe câmeras por **RTMP push** (cada 
 
 O laboratório roda numa única VM Debian no Proxmox (disco de 25 GB para o sistema + 35 GB para vídeo). Todos os serviços ficam em contêineres separados, para que a migração ao servidor dedicado mude apenas configuração e escala.
 
-> **Estado atual: Fase 6 — armazenamento e proteção de disco.** Painel com login, papéis, permissões por câmera, cadastros, ao vivo (WebRTC e HLS), gravação contínua das câmeras marcadas (conferência de cada segmento e retenção) e a tela **Gravações**: calendário, linha do tempo com as lacunas, player com velocidades e exportação MP4 auditada. As telas das fases seguintes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
+> **Estado atual: Fase 7 — monitoramento, alertas por e-mail e relatórios.** Painel com login, papéis, permissões por câmera, cadastros, ao vivo (WebRTC e HLS), gravação contínua das câmeras marcadas (conferência de cada segmento e retenção) e a tela **Gravações**: calendário, linha do tempo com as lacunas, player com velocidades e exportação MP4 auditada; Armazenamento e Servidores; Dashboard com gráficos de 24 h, Eventos e Alertas (com aviso por e-mail) e Relatórios de disponibilidade. As telas das fases seguintes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
 
 ---
 
@@ -21,16 +21,18 @@ Navegador ──HTTP :80──► gateway (Caddy) ──/api/*──────
 Navegador ◄──── mídia WebRTC :8189 (UDP/TCP) ──── mediamtx
 ```
 
-| Serviço    | Papel                                                                                                         |
-| ---------- | ------------------------------------------------------------------------------------------------------------- |
-| `postgres` | Fonte da verdade. Row Level Security isola os clientes.                                                       |
-| `redis`    | Acorda o worker quando há tarefa nova. Tarefas críticas ficam no PostgreSQL (`durable_jobs`).                 |
-| `migrate`  | Aplica migrations e o seed idempotente e termina.                                                             |
-| `api`      | API REST do painel e do app (login, cadastros, permissões, auditoria) e autorização/hooks do MediaMTX.        |
-| `worker`   | Valida o vídeo (ffprobe), mantém os caminhos do MediaMTX iguais ao banco, monitora estados, bitrate e quedas. |
-| `mediamtx` | Recebe RTMP e entrega o ao vivo (HLS/WebRTC). API, RTSP, HLS e a sinalização WebRTC ficam só na rede interna. |
-| `web`      | Painel administrativo (Next.js). Só consome a API, a mesma que o app mobile usará.                            |
-| `gateway`  | Entrada HTTP. Bloqueia rotas internas, confere o token do ao vivo na API, aplica cabeçalhos de segurança.     |
+| Serviço         | Papel                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------- |
+| `postgres`      | Fonte da verdade. Row Level Security isola os clientes.                                                       |
+| `redis`         | Acorda o worker quando há tarefa nova. Tarefas críticas ficam no PostgreSQL (`durable_jobs`).                 |
+| `migrate`       | Aplica migrations e o seed idempotente e termina.                                                             |
+| `api`           | API REST do painel e do app (login, cadastros, permissões, auditoria) e autorização/hooks do MediaMTX.        |
+| `worker`        | Valida o vídeo (ffprobe), mantém os caminhos do MediaMTX iguais ao banco, monitora estados, bitrate e quedas. |
+| `mediamtx`      | Recebe RTMP e entrega o ao vivo (HLS/WebRTC). API, RTSP, HLS e a sinalização WebRTC ficam só na rede interna. |
+| `web`           | Painel administrativo (Next.js). Só consome a API, a mesma que o app mobile usará.                            |
+| `prometheus`    | Métricas do servidor (node-exporter) e do servidor de mídia, 7 dias ou 2 GB. Só na rede interna.              |
+| `node-exporter` | CPU, memória, discos e rede da VM, lidos pelo Prometheus. Só na rede interna.                                 |
+| `gateway`       | Entrada HTTP. Bloqueia rotas internas, confere o token do ao vivo na API, aplica cabeçalhos de segurança.     |
 
 ### Caminhos no servidor de mídia
 
@@ -125,7 +127,11 @@ Postgres, Redis, API do MediaMTX, RTSP, HLS e a sinalização WebRTC **não** s�
 - **Segurança das gravações:** o navegador recebe só um endereço temporário `/playback/<token>/get?…` ligado ao usuário, à sessão e à câmera, que o gateway reconfere a cada pedido (permissão **pode reproduzir**). Só `/get` em fMP4 de até 1 h é aceito; o servidor de reprodução (porta 9996) fica só na rede interna e exige credencial.
 - **Armazenamento (Fase 6):** o worker mede a cada 30 s o disco de vídeo (espaço e latência de escrita) e o disco do sistema. Limites de **70% (atenção), 85% (alto) e 95% (crítico)**, ajustáveis por disco, com evento e alerta. No crítico, a **limpeza de emergência** apaga as gravações mais antigas daquele disco, mesmo dentro da retenção, até voltar a 90%. Nunca apaga as mais novas que a idade mínima (60 min, ajustável). Se não houver o que apagar, a gravação para (o ao vivo continua) e volta sozinha abaixo de 90%. Cada limpeza fica no evento, no alerta e na auditoria. A cota do cliente só gera alerta (90% e 100%). Escrita de 64 KiB acima de 1 s abre o alerta de **disco lento**.
 - **Buracos na gravação:** a conferência de cada segmento detecta trechos sem vídeo dentro do arquivo (quadros descartados numa travada de disco). Eles aparecem como lacuna na linha do tempo, dividem a exportação e geram evento. A fila do gravador (`writeQueueSize: 8192`) aguenta travadas de disco de alguns minutos sem perder quadros.
-- **Servidores:** CPU, memória, disco do sistema, espera por disco (pressão de IO do kernel), tempo ligado e estado de API, worker, banco, Redis e servidor de mídia.
+- **Servidores:** CPU, memória, disco do sistema, espera por disco (pressão de IO do kernel), rede (entrada e saída, via Prometheus), tempo ligado e estado de API, worker, banco, Redis, servidor de mídia e Prometheus.
+- **Alertas (Fase 7):** câmera sem sinal, gravação parada, disco (níveis, limpeza, bloqueio, lentidão), cota do cliente e disco do sistema. Cada alerta é único enquanto aberto, fecha sozinho quando a situação volta ao normal e pode ser **reconhecido** ou **resolvido** (com autoria e auditoria). O sino do cabeçalho mostra quantos estão ativos. Cada usuário só vê os alertas das câmeras que enxerga.
+- **E-mail dos alertas:** **Configurações → Integrações → E-mail (SMTP)** (só o Super Admin). Para Gmail: `smtp.gmail.com`, porta 587, STARTTLS, usuário = e-mail completo e **senha de app** (Conta Google → Segurança → Verificação em duas etapas → Senhas de app). A senha fica cifrada e nunca volta ao navegador. Envia os alertas a partir da gravidade escolhida (padrão: erro), avisa quando se resolvem e junta mais de 5 de uma vez num resumo. "Enviar e-mail de teste" confere a configuração salva; os últimos envios aparecem no cartão.
+- **Dashboard:** números de câmeras, gráficos de 24 h (câmeras online e tráfego de entrada, uma amostra a cada 5 min), alertas ativos, últimos eventos, disco de vídeo e usuários conectados (web e app).
+- **Relatórios:** disponibilidade por câmera no período (tempo no ar ÷ tempo observado, medido a cada 10 s), gravação, quedas, lacunas e volume gravado, com download em **CSV** (Excel em português). O cliente vê só as câmeras dele.
 - **Espaço:** 24 h ocupam cerca de **bitrate (Mbps) × 10,8 GB**. Ex.: 1,9 Mbps ≈ 20,5 GB.
 - **Sessão:** token de acesso de 15 min em memória e renovação por cookie httpOnly (30 dias), trocado a cada uso. Login bloqueia 15 min após 5 erros no mesmo e-mail (ou 20 no mesmo IP).
 

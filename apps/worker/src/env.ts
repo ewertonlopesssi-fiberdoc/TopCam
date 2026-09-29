@@ -39,6 +39,13 @@ const schema = z.object({
   /** Métricas do servidor (tela Servidores). */
   HOST_METRICS_INTERVAL_S: z.coerce.number().positive().default(30),
   API_READY_URL: z.string().default("http://api:3000/ready"),
+  /** Endereço do painel usado nos e-mails de alerta (ex.: http://video.exemplo.com.br). */
+  PANEL_URL: z.string().default(""),
+  /** Prometheus interno (Fase 7): saúde e tráfego de rede da VM. Vazio = não consulta. */
+  PROMETHEUS_URL: z.string().default("http://prometheus:9090"),
+  CAMERA_ALERTS_INTERVAL_S: z.coerce.number().positive().default(10),
+  NOTIFY_INTERVAL_S: z.coerce.number().positive().default(15),
+  STATUS_SAMPLE_INTERVAL_S: z.coerce.number().positive().default(300),
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
   WORKER_ID: z.string().default(`worker-${hostname()}`),
 });

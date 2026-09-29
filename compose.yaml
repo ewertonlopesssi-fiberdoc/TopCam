@@ -117,6 +117,8 @@ services:
       <<: *app-env
       POLL_INTERVAL_S: ${POLL_INTERVAL_S:-5}
       OFFLINE_AFTER_S: ${OFFLINE_AFTER_S:-10}
+      # Link do painel nos e-mails de alerta.
+      PANEL_URL: ${PANEL_URL:-http://${PUBLIC_HOST:-localhost}}
     volumes:
       - ${RECORDINGS_DIR:-./.data/recordings}:/recordings
     depends_on:
@@ -226,6 +228,45 @@ services:
       timeout: 3s
       retries: 10
 
+  # ------------------------------------------------------------ métricas (Fase 7)
+  # Prometheus: 7 dias de métricas da VM e do servidor de mídia. Sem porta publicada.
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-7d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_MAX_SIZE:-2GB}
+    volumes:
+      - ./infra/prometheus:/etc/prometheus:ro
+      - prometheusdata:/prometheus
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+
+  # CPU, memória, discos, rede e pressão de IO da VM (lidos do /proc e /sys do host).
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    command:
+      - --path.rootfs=/host
+      - --collector.pressure
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    restart: unless-stopped
+    logging: *logging
+
+  # Caixa de e-mail de teste (perfil "test"): o aceite da Fase 7 envia os alertas para
+  # ela em vez do Gmail. Interface só na rede interna.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    profiles: ["test"]
+    logging: *logging
+
   # ------------------------------------------------------------ perfil "test"
   # Transmissor RTMP de teste (simula câmeras). Ex.:
   #   docker compose --profile test run -d --rm test-transmitter publish <CHAVE> CAM-001
@@ -266,5 +307,6 @@ services:
 
 volumes:
   pgdata:
+  prometheusdata:
   redisdata:
   caddydata:

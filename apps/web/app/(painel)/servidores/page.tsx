@@ -1,6 +1,15 @@
 "use client";
 
-import { Activity, CheckCircle2, Cpu, HardDrive, MemoryStick, Server, XCircle } from "lucide-react";
+import {
+  Activity,
+  CheckCircle2,
+  Cpu,
+  HardDrive,
+  MemoryStick,
+  Network,
+  Server,
+  XCircle,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Badge, ErrorBox, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -19,6 +28,7 @@ interface HostMetrics {
   cpu_pressure: { some10: number; some300: number } | null;
   system_disk: { total: number; free: number; pct: number };
   services: Record<string, "ok" | "fail">;
+  network?: { rx_bps: number; tx_bps: number } | null;
 }
 interface IngestNode {
   id: string;
@@ -53,7 +63,9 @@ const SERVICE_LABEL: Record<string, string> = {
   database: "Banco de dados",
   redis: "Redis",
   mediamtx: "Servidor de mídia",
+  prometheus: "Prometheus (métricas)",
 };
+const mbps = (bps: number) => `${num(bps / 1e6)} Mb/s`;
 
 const num = (v: number, d = 1) => v.toFixed(d).replace(".", ",");
 function uptime(s: number) {
@@ -150,7 +162,7 @@ function NodeCard({ node: n }: { node: IngestNode }) {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
         <Tile
           icon={<Activity size={15} />}
           k="Câmeras"
@@ -198,6 +210,16 @@ function NodeCard({ node: n }: { node: IngestNode }) {
           k="Transmissões no servidor"
           v={String(n.metrics.paths_ready ?? "—")}
           hint="caminhos prontos no servidor de mídia"
+        />
+        <Tile
+          icon={<Network size={15} />}
+          k="Rede"
+          v={h?.network ? `↓ ${mbps(h.network.rx_bps)}` : "—"}
+          hint={
+            h?.network
+              ? `↑ ${mbps(h.network.tx_bps)} · média 5 min (Prometheus)`
+              : "sem dados do Prometheus"
+          }
         />
       </div>
 

@@ -129,6 +129,17 @@ export async function request<T = unknown>(
   return (await parse(res)) as T;
 }
 
+/** GET que devolve o arquivo (CSV, etc.) com o token da sessão. */
+export async function fetchBlob(path: string, retry = true): Promise<Blob> {
+  const res = await fetch(`/api/v1${path}`, {
+    headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
+    credentials: "same-origin",
+  });
+  if (res.status === 401 && retry && (await refresh())) return fetchBlob(path, false);
+  if (!res.ok) await parse(res);
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body: unknown = {}) => request<T>("POST", path, body),

@@ -37,7 +37,20 @@ export interface HostMetrics {
   io_pressure: { some10: number; full10: number; some300: number; full300: number } | null;
   cpu_pressure: { some10: number; some300: number } | null;
   system_disk: FsInfo & { pct: number };
+  /** Tráfego de rede da VM (bits/s, média de 5 min), via Prometheus/node-exporter. */
+  network: { rx_bps: number; tx_bps: number } | null;
   services: Record<string, "ok" | "fail">;
+}
+
+const NET = `{device!~"lo|veth.*|docker.*|br-.*|virbr.*"}`;
+
+async function promQuery(base: string, q: string): Promise<number | null> {
+  const r = await fetch(`${base}/api/v1/query?query=${encodeURIComponent(q)}`, {
+    signal: AbortSignal.timeout(3000),
+  });
+  const j = (await r.json()) as { data?: { result?: Array<{ value?: [number, string] }> } };
+  const v = j.data?.result?.[0]?.value?.[1];
+  return v === undefined ? null : Math.round(Number(v));
 }
 
 async function readText(path: string): Promise<string> {
@@ -65,6 +78,7 @@ export async function collectHostMetrics(
     read?: typeof readText;
     measure?: typeof measureFs;
     fetchReady?: () => Promise<unknown>;
+    prom?: (q: string) => Promise<number | null>;
   } = {},
 ): Promise<HostMetrics> {
   const read = deps.read ?? readText;
@@ -122,6 +136,20 @@ export async function collectHostMetrics(
     services.api = "fail";
   }
 
+  // Prometheus: está no ar? E o tráfego de rede da VM (node-exporter).
+  let network: HostMetrics["network"] = null;
+  if (ctx.env.PROMETHEUS_URL || deps.prom) {
+    const prom = deps.prom ?? ((q: string) => promQuery(ctx.env.PROMETHEUS_URL, q));
+    try {
+      const rx = await prom(`sum(rate(node_network_receive_bytes_total${NET}[5m])) * 8`);
+      const tx = await prom(`sum(rate(node_network_transmit_bytes_total${NET}[5m])) * 8`);
+      services.prometheus = "ok";
+      if (rx !== null && tx !== null) network = { rx_bps: rx, tx_bps: tx };
+    } catch {
+      services.prometheus = "fail";
+    }
+  }
+
   const m: HostMetrics = {
     at: new Date().toISOString(),
     cpu_pct: cpuPct,
@@ -134,6 +162,7 @@ export async function collectHostMetrics(
     io_pressure: ioPressure,
     cpu_pressure: cpuPressure,
     system_disk: { ...sys, pct: sysPct },
+    network,
     services,
   };
 
