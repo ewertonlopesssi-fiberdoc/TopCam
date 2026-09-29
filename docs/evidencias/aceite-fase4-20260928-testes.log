@@ -2,10 +2,10 @@
  Container topcam-redis-1 Running 
  Container topcam-redis-1 Waiting 
  Container topcam-postgres-1 Waiting 
- Container topcam-redis-1 Healthy 
  Container topcam-postgres-1 Healthy 
- Container topcam-tests-run-b28e3cb231c7 Creating 
- Container topcam-tests-run-b28e3cb231c7 Created 
+ Container topcam-redis-1 Healthy 
+ Container topcam-tests-run-7374ef5e9e4d Creating 
+ Container topcam-tests-run-7374ef5e9e4d Created 
 
 > topcam@0.1.0 lint /app
 > eslint .
@@ -17,30 +17,34 @@
 
  RUN  v5.0.2 /app
 
- ✓ |unit| packages/shared/test/shared.unit.test.ts (17 tests) 142ms
- ✓ |unit| apps/worker/test/worker.unit.test.ts (5 tests) 10ms
- ✓ |integration| apps/api/test/phase2.int.test.ts (19 tests) 5651ms
+ ✓ |unit| packages/shared/test/shared.unit.test.ts (17 tests) 121ms
+ ✓ |unit| apps/worker/test/worker.unit.test.ts (5 tests) 17ms
+ ✓ |integration| apps/api/test/phase2.int.test.ts (19 tests) 6528ms
    ✓ autenticação (6)
-     ✓ bloqueia após 5 tentativas erradas no mesmo e-mail 587ms
-     ✓ primeiro acesso exige troca de senha antes de usar a API 644ms
+     ✓ recusa senha errada e e-mail inexistente com a mesma mensagem 310ms
+     ✓ bloqueia após 5 tentativas erradas no mesmo e-mail 606ms
+     ✓ primeiro acesso exige troca de senha antes de usar a API 623ms
    ✓ cadastros, papéis e isolamento (13)
-     ✓ administrador cria usuários do cliente com senha temporária 657ms
-     ✓ administrador do cliente só gerencia o próprio cliente 628ms
-     ✓ desativar usuário e suspender cliente cortam o acesso na hora 450ms
-     ✓ excluir usuário corta o acesso, some da lista e libera o e-mail 760ms
- ✓ |integration| apps/worker/test/worker.int.test.ts (13 tests) 2953ms
+     ✓ administrador cria usuários do cliente com senha temporária 722ms
+     ✓ administrador do cliente só gerencia o próprio cliente 747ms
+     ✓ desativar usuário e suspender cliente cortam o acesso na hora 484ms
+     ✓ excluir usuário corta o acesso, some da lista e libera o e-mail 849ms
+ ✓ |integration| apps/worker/test/worker.int.test.ts (13 tests) 3029ms
    ✓ poller de status (5)
-     ✓ recupera câmera transmitindo, detecta vídeo parado e queda 1446ms
- ✓ |integration| apps/api/test/phase3.int.test.ts (10 tests) 2404ms
- ✓ |integration| apps/worker/test/recordings.int.test.ts (10 tests) 2234ms
- ✓ |integration| apps/api/test/phase4.int.test.ts (6 tests) 2382ms
+     ✓ recupera câmera transmitindo, detecta vídeo parado e queda 1428ms
+ ✓ |integration| apps/api/test/phase3.int.test.ts (10 tests) 2290ms
+ ✓ |integration| apps/worker/test/recordings.int.test.ts (10 tests) 9169ms
+   ✓ conferência de segmentos (3)
+     ✓ segmento válido vira verified (tamanho, SHA-256, codecs, duração) e a câmera passa a gravando 345ms
+     ✓ registra a lacuna entre segmentos uma única vez 329ms
+ ✓ |integration| apps/api/test/phase4.int.test.ts (6 tests) 2611ms
    ✓ resumo e linha do tempo (2)
-     ✓ mostram só segmentos conferidos, com lacunas; exigem permissão de reprodução 892ms
- ✓ |integration| apps/api/test/api.int.test.ts (13 tests) 1267ms
- ✓ |integration| packages/db/test/db.int.test.ts (11 tests) 1019ms
+     ✓ mostram só segmentos conferidos, com lacunas; exigem permissão de reprodução 915ms
+ ✓ |integration| apps/api/test/api.int.test.ts (13 tests) 1345ms
+ ✓ |integration| packages/db/test/db.int.test.ts (11 tests) 1112ms
 
  Test Files  9 passed (9)
       Tests  104 passed (104)
-   Start at  01:33:06
-   Duration  23.01s (tests 85%, import 12%, transform 3%)
+   Start at  02:36:39
+   Duration  32.30s (tests 87%, import 9%, transform 4%)
 

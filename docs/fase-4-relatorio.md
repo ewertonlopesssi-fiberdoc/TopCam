@@ -32,17 +32,31 @@ Evidência: `docs/evidencias/aceite-fase4-20260928.md` e o log dos testes. No ac
 | # | Critério | Resultado |
 |---|---|---|
 | R1 | O servidor de mídia grava só as câmeras marcadas | ✅ |
-| R2 | Primeiro segmento conferido → "gravando" | ✅ em 64 s |
-| R3 | Segmentos contínuos de ~60 s | ✅ 60,0–63,8 s; maior intervalo 0,01 s |
+| R2 | Primeiro segmento conferido → "gravando" | ✅ em 57 s |
+| R3 | Segmentos contínuos de ~60 s (janela com a câmera já gravando) | ✅ 60,0 s; maior intervalo 0,01 s |
 | R4 | Câmeras só ao vivo: zero arquivos e zero registros | ✅ |
-| R5 | Queda de 30 s: offline, lacuna registrada, volta a gravar | ✅ lacuna de 35,2 s (queda + reconexão) |
-| R6 | Reinício do servidor de mídia | ✅ volta a gravar; trecho interrompido (23,3 s) conferido |
+| R5 | Queda de 30 s: offline, lacuna registrada, volta a gravar | ✅ lacuna de 35,1 s (queda + reconexão) |
+| R6 | Reinício do servidor de mídia | ✅ volta a gravar; trecho interrompido (23,9 s) conferido |
 | R7 | API fora do ar por 80 s | ✅ os 2 segmentos do período indexados e conferidos pela varredura |
-| R8 | Retenção | ✅ 13 vencidos apagados do disco e do banco; os 2 mais recentes mantidos |
+| R8 | Retenção | ✅ 9 vencidos apagados do disco e do banco; os 2 mais recentes mantidos |
 | R9 | Outras câmeras gravando (informativo) | nenhuma no ambiente de desenvolvimento |
 | R10 | Lint e testes | ✅ 104/104 |
 
-**Observação sobre a evidência do R2:** o tamanho mostrado ("24.200 ms") é de um segmento de uma execução anterior do aceite, que tinha sido interrompida. A consulta do texto não filtrava pelo início da execução. O critério em si (estado "gravando" em 64 s) está correto, e a consulta foi corrigida no script.
+**Primeira execução na VM (28/09, 23:13): 8/10.** As duas falhas vieram do roteiro, não da gravação:
+
+- **R10:** o aceite rodou a imagem de testes antiga (85 testes da Fase 3). Reconstruída a imagem, deu **104/104 na VM**.
+- **R3:** o transmissor da CAM-001, que sobrou da execução interrompida pela queda do SSH, foi religado no início e criou um trecho curto e uma lacuna de 7 s dentro da janela medida.
+- **R9:** mostrou "nenhuma" por erro de SQL, embora a TWG estivesse gravando.
+
+Na mesma VM, `recording:status` mostrou a TWG 6608 **gravando**: 24 segmentos, 260 MB em 21 min (≈18 GB/24 h) e nenhum problema. As 3 lacunas vieram da recriação e do reinício do servidor de mídia feitos pela atualização e pelo R6.
+
+**Roteiro corrigido (evidência atual, 10/10 no ambiente de desenvolvimento):**
+
+- o R10 sempre reconstrói a imagem de testes;
+- o R3 mede só a partir da câmera já gravando;
+- o R9 lista as câmeras reais com horas e espaço;
+- a limpeza roda também se a conexão SSH cair, e as sobras de execuções interrompidas são removidas no início;
+- o aceite avisa quando há câmeras reais gravando, e a opção `--skip-restart` pula o R6 (que interrompe todas as câmeras por alguns segundos).
 
 ## Problemas encontrados e corrigidos durante a fase
 
@@ -86,8 +100,9 @@ Evidência: `docs/evidencias/aceite-fase4-20260928.md` e o log dos testes. No ac
 
 ```bash
 cd /opt/topcam
-scripts/update.sh --bundle /root/topcam-fase4.bundle   # migration 0004, storage-init, MediaMTX sem root
-scripts/accept-phase4.sh --no-build                     # ~15 min, deve dar 10/10
+scripts/update.sh --bundle /root/topcam-fase4b.bundle
+nohup scripts/accept-phase4.sh --no-build --skip-restart > /root/aceite4.log 2>&1 &
+tail -f /root/aceite4.log                               # ~15 min; deve dar 9/9 aprovados (R6 pulado)
 docker compose exec api node apps/api/dist/cli.js recording:status
 git push
 ```

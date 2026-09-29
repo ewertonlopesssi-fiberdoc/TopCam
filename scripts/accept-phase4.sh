@@ -18,17 +18,23 @@
 #   R10 lint e testes automatizados
 # Relatório em reports/phase4-<data>.md. Duração: ~15 min.
 #
-# Uso:  scripts/accept-phase4.sh [--no-build] [--skip-tests]
+# Uso:  scripts/accept-phase4.sh [--no-build] [--skip-tests] [--skip-restart]
+#   --skip-restart  pula o R6 (reinício do servidor de mídia), que interrompe por
+#                   alguns segundos TODAS as câmeras, inclusive as reais gravando.
+# Rodar sem depender da conexão SSH:
+#   nohup scripts/accept-phase4.sh --no-build > /root/aceite4.log 2>&1 &
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 BUILD=1
 RUN_TESTS=1
+SKIP_RESTART=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-build) BUILD=0; shift ;;
     --skip-tests) RUN_TESTS=0; shift ;;
+    --skip-restart) SKIP_RESTART=1; shift ;;
     *) echo "opção desconhecida: $1" >&2; exit 2 ;;
   esac
 done
@@ -47,6 +53,7 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 REPORT="reports/phase4-${STAMP}.md"
 RESULTS=()
 FAILS=0
+SKIPS=0
 TENANT=empresa-alfa
 CAMS=(CAM-001 CAM-002 CAM-003 CAM-004 CAM-005)
 
@@ -54,6 +61,11 @@ record() {
   RESULTS+=("| $1 | $3 | $([ "$2" = PASS ] && echo '✅ PASSOU' || echo '❌ FALHOU') | $4 |")
   [ "$2" = PASS ] || FAILS=$((FAILS + 1))
   log "$1 $2 — $4"
+}
+skip() { # skip <id> <critério> <motivo>
+  RESULTS+=("| $1 | $2 | ⏭️ PULADO | $3 |")
+  SKIPS=$((SKIPS + 1))
+  log "$1 PULADO — $3"
 }
 pass_if() { [ "$1" = 1 ] && echo PASS || echo FAIL; }
 
@@ -103,6 +115,17 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
+trap 'cleanup; exit 129' HUP   # conexão SSH caiu
+
+# Transmissores de teste que tenham sobrado de uma execução interrompida.
+for c in "${CAMS[@]}"; do stop_tx "$c"; done
+
+REAL_CAMS=$(sql "SELECT string_agg(t.slug || '/' || c.code, ', ') FROM cameras c JOIN tenants t ON t.id = c.tenant_id
+                  WHERE c.recording_enabled AND c.enabled AND c.deleted_at IS NULL AND c.id <> '$CAM1'")
+if [ -n "$REAL_CAMS" ] && [ "$SKIP_RESTART" = 0 ]; then
+  log "AVISO: câmeras gravando fora do teste: $REAL_CAMS."
+  log "AVISO: o R6 reinicia o servidor de mídia e cria uma lacuna de alguns segundos nelas. Para evitar: --skip-restart"
+fi
 
 # ------------------------------------------------------------------ R1: quem grava
 log "R1: ligando a gravação da CAM-001 de teste (24 h) e conferindo o servidor de mídia"
@@ -139,14 +162,16 @@ record R2 "$(pass_if $ok)" "Primeiro segmento conferido (tamanho, SHA-256, ffpro
   "$(status_of "$CAM1") em $(( $(now_s) - T_TX )) s; 1º segmento: ${FIRST:-nenhum}"
 
 # ------------------------------------------------------------------ R3: continuidade
+# Janela limpa: só segmentos que começam depois que a câmera já está gravando.
 log "R3: 3 min de gravação contínua"
-sleep 190
+T_R3=$(sql "SELECT now()")
+sleep 200
 CONT=$(sql "WITH s AS (SELECT started_at, ended_at, duration_ms, lag(ended_at) OVER (ORDER BY started_at) AS prev_end
-                         FROM recording_segments WHERE camera_id = '$CAM1' AND state = 'verified' AND started_at >= '$T_START')
+                         FROM recording_segments WHERE camera_id = '$CAM1' AND state = 'verified' AND started_at >= '$T_R3')
             SELECT count(*) || '|' || coalesce(round(min(duration_ms) / 1000.0, 1), 0) || '|' || coalesce(round(max(duration_ms) / 1000.0, 1), 0)
                    || '|' || coalesce(round(max(extract(epoch FROM started_at - prev_end))::numeric, 2), 0) FROM s")
 IFS='|' read -r n dmin dmax maxgap <<<"$CONT"
-ok=$([ "${n:-0}" -ge 3 ] && awk "BEGIN{exit !($maxgap <= 3)}" && echo 1)
+ok=$([ "${n:-0}" -ge 2 ] && awk "BEGIN{exit !($maxgap <= 3)}" && echo 1)
 record R3 "$(pass_if "$ok")" "Segmentos contínuos de ~60 s, sem lacunas com a transmissão no ar" \
   "$n segmentos conferidos; duração ${dmin}–${dmax} s; maior intervalo entre segmentos: ${maxgap} s"
 
@@ -178,6 +203,9 @@ record R5 "$(pass_if "$([ "${OFF:-0}" -ge 1 ] && [ -n "$GAP" ] && [ "$ST" = grav
   "Queda de 30 s: offline, lacuna registrada e volta a gravar" "evento offline: $OFF; lacuna: ${GAP:-nenhuma} s; estado: $ST"
 
 # ------------------------------------------------------------------ R6: reinício do MediaMTX
+if [ "$SKIP_RESTART" = 1 ]; then
+  skip R6 "Reinício do servidor de mídia: a gravação volta e o trecho interrompido é indexado" "--skip-restart"
+else
 log "R6: reiniciando o servidor de mídia no meio de um segmento"
 sleep 20
 N0=$(verified_count "$CAM1")
@@ -193,6 +221,7 @@ CUT=$(sql "SELECT state || ' ' || round(duration_ms / 1000.0, 1) || ' s' FROM re
 record R6 "$(pass_if "$([ "${AFTER:-0}" -ge 1 ] && [[ "$CUT" == verified* ]] && echo 1)")" \
   "Reinício do servidor de mídia: a gravação volta e o trecho interrompido é indexado" \
   "segmentos conferidos após o reinício: $AFTER; trecho interrompido: ${CUT:-não encontrado}"
+fi
 
 # ------------------------------------------------------------------ R7: API fora do ar
 log "R7: API fora do ar por 80 s (um segmento termina sem aviso)"
@@ -247,19 +276,21 @@ record R8 "$(pass_if "$([ "$left" = 0 ] && [ "$KEPT" = 2 ] && [ "$OTHER_AFTER" -
   "vencidos: $EXP_N; arquivos que sobraram: $left; mantidos: $KEPT/2; outras câmeras: $OTHER_BEFORE antes, $OTHER_AFTER depois"
 
 # ------------------------------------------------------------------ R9: câmeras reais
-REAL=$(sql "SELECT string_agg(t.slug || '/' || c.code || ' ' || c.status || ': ' ||
-              coalesce(round(extract(epoch FROM (max(s.ended_at) - min(s.started_at))) / 3600, 1), 0) || ' h, ' ||
-              pg_size_pretty(coalesce(sum(s.size_bytes), 0)), '; ')
-              FROM cameras c JOIN tenants t ON t.id = c.tenant_id
-              LEFT JOIN recording_segments s ON s.camera_id = c.id AND s.state = 'verified'
-             WHERE c.recording_enabled AND c.id <> '$CAM1' AND c.deleted_at IS NULL
-             GROUP BY t.slug, c.code, c.status")
+REAL=$(sql "SELECT string_agg(x.linha, '; ') FROM (
+              SELECT t.slug || '/' || c.code || ' ' || c.status || ': ' ||
+                     coalesce(round((extract(epoch FROM (max(s.ended_at) - min(s.started_at))) / 3600)::numeric, 1), 0) || ' h, ' ||
+                     count(s.id) || ' segmentos, ' || pg_size_pretty(coalesce(sum(s.size_bytes), 0)::bigint) AS linha
+                FROM cameras c JOIN tenants t ON t.id = c.tenant_id
+                LEFT JOIN recording_segments s ON s.camera_id = c.id AND s.state = 'verified'
+               WHERE c.recording_enabled AND c.id <> '$CAM1' AND c.deleted_at IS NULL
+               GROUP BY t.slug, c.code, c.status) x")
 record R9 PASS "Outras câmeras gravando (informativo)" "${REAL:-nenhuma}"
 
 # ------------------------------------------------------------------ R10: testes
 TEST_LOG="reports/phase4-${STAMP}-testes.log"
 if [ "$RUN_TESTS" = 1 ]; then
-  log "R10: lint + testes"
+  log "R10: lint + testes (a imagem de testes é reconstruída se o código mudou)"
+  dc --profile test build tests >/dev/null 2>&1 || log "aviso: falha ao construir a imagem de testes"
   dc --profile test run --rm -e NO_COLOR=1 tests sh -c "pnpm lint && pnpm test" >"$TEST_LOG" 2>&1; rc=$?
   summary=$(sed 's/\x1b\[[0-9;]*m//g' "$TEST_LOG" | grep -E "^\s+Tests\s" | tail -n1 | xargs)
   record R10 "$([ $rc -eq 0 ] && echo PASS || echo FAIL)" "Lint e testes automatizados" "${summary:-sem resumo} (log: $TEST_LOG)"
@@ -276,7 +307,7 @@ fi
   echo "|---|---|---|---|"
   printf '%s\n' "${RESULTS[@]}"
   echo
-  echo "**Total: $(( ${#RESULTS[@]} - FAILS ))/${#RESULTS[@]} aprovados.**"
+  echo "**Total: $(( ${#RESULTS[@]} - FAILS - SKIPS ))/$(( ${#RESULTS[@]} - SKIPS )) aprovados$([ "$SKIPS" -gt 0 ] && echo " ($SKIPS pulado)").**"
   echo
   echo "Retenção real de 24 h: acompanhar com \`docker compose exec api node apps/api/dist/cli.js recording:status\` (o mais antigo deve ficar em ~24 h e o espaço estável)."
 } >"$REPORT"
