@@ -7,6 +7,7 @@ import cookie from "@fastify/cookie";
 import { HttpError, sendError } from "./lib/http.js";
 import { authPlugin } from "./plugins/auth.js";
 import { adminRoutes } from "./routes/admin.js";
+import { storageRoutes } from "./routes/storage.js";
 import { authRoutes } from "./routes/auth.js";
 import { cameraRoutes } from "./routes/cameras.js";
 import { healthRoutes } from "./routes/health.js";
@@ -78,5 +79,6 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(liveRoutes);
   await app.register(recordingRoutes);
   await app.register(adminRoutes);
+  await app.register(storageRoutes);
   return app;
 }

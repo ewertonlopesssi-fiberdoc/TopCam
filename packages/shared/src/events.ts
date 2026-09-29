@@ -24,6 +24,14 @@ export const CAMERA_EVENT_TYPES = [
   "segment_corrupt",
   "segment_missing",
   "unexpected_recording",
+  // armazenamento e servidor (Fase 6)
+  "storage_level",
+  "storage_purge",
+  "storage_recording_blocked",
+  "storage_recording_resumed",
+  "storage_slow",
+  "tenant_quota",
+  "system_disk",
 ] as const;
 
 export type CameraEventType = (typeof CAMERA_EVENT_TYPES)[number];

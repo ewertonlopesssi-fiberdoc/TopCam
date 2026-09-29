@@ -4,7 +4,7 @@ Plataforma multiempresa de câmeras IP: recebe câmeras por **RTMP push** (cada 
 
 O laboratório roda numa única VM Debian no Proxmox (disco de 25 GB para o sistema + 35 GB para vídeo). Todos os serviços ficam em contêineres separados, para que a migração ao servidor dedicado mude apenas configuração e escala.
 
-> **Estado atual: Fase 5 — gravações.** Painel com login, papéis, permissões por câmera, cadastros, ao vivo (WebRTC e HLS), gravação contínua das câmeras marcadas (conferência de cada segmento e retenção) e a tela **Gravações**: calendário, linha do tempo com as lacunas, player com velocidades e exportação MP4 auditada. As telas das fases seguintes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
+> **Estado atual: Fase 6 — armazenamento e proteção de disco.** Painel com login, papéis, permissões por câmera, cadastros, ao vivo (WebRTC e HLS), gravação contínua das câmeras marcadas (conferência de cada segmento e retenção) e a tela **Gravações**: calendário, linha do tempo com as lacunas, player com velocidades e exportação MP4 auditada. As telas das fases seguintes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
 
 ---
 
@@ -78,6 +78,7 @@ Navegador ◄──── mídia WebRTC :8189 (UDP/TCP) ──── mediamtx
    scripts/accept-phase3.sh     # ao vivo das 5 câmeras (HLS, WebRTC, segurança), ~3 min
    scripts/accept-phase4.sh     # gravação, lacunas, reinícios e retenção, ~15 min
    scripts/accept-phase5.sh     # reprodução, segurança, permissões e exportação MP4, ~10 min
+   scripts/accept-phase6.sh     # limites de disco, limpeza de emergência, bloqueio e retomada, ~15 min
    ```
 6. **Entrar no painel:** `http://<PUBLIC_HOST>` com `ADMIN_EMAIL` e `ADMIN_INITIAL_PASSWORD` do `.env`. No primeiro acesso o sistema exige a troca da senha (mínimo 10 caracteres, letras e números, sem conter o e-mail).
 
@@ -122,6 +123,9 @@ Postgres, Redis, API do MediaMTX, RTSP, HLS e a sinalização WebRTC **não** s�
 - **Gravações:** árvore de câmeras com gravação, calendário do mês (dias com gravação em destaque), linha do tempo do dia (24 h, 6 h ou 1 h) com os trechos gravados, as **lacunas de sinal** em vermelho e o cursor da reprodução (clique para ir). O player toca os trechos em sequência, **pula as lacunas sozinho**, tem velocidades 0,5x a 8x, ±10 s, som e tela cheia, e mostra a data e hora do quadro. **Início/Fim + Buscar** vai direto a um horário.
 - **Exportação MP4:** com a permissão **pode exportar** (por câmera), **Baixar MP4** gera o arquivo do trecho Início–Fim (máximo `EXPORT_MAX_S`, 1 h por padrão) com o nome `CAM-001_AAAA-MM-DD_hh-mm-ss_Nmin.mp4`. Se o trecho tiver lacunas, os blocos gravados vêm emendados num arquivo só. O pedido e o download ficam na **auditoria**; o link vale 10 min e é ligado ao usuário e à sessão.
 - **Segurança das gravações:** o navegador recebe só um endereço temporário `/playback/<token>/get?…` ligado ao usuário, à sessão e à câmera, que o gateway reconfere a cada pedido (permissão **pode reproduzir**). Só `/get` em fMP4 de até 1 h é aceito; o servidor de reprodução (porta 9996) fica só na rede interna e exige credencial.
+- **Armazenamento (Fase 6):** o worker mede a cada 30 s o disco de vídeo (espaço e latência de escrita) e o disco do sistema. Limites de **70% (atenção), 85% (alto) e 95% (crítico)**, ajustáveis por disco, com evento e alerta. No crítico, a **limpeza de emergência** apaga as gravações mais antigas daquele disco, mesmo dentro da retenção, até voltar a 90%. Nunca apaga as mais novas que a idade mínima (60 min, ajustável). Se não houver o que apagar, a gravação para (o ao vivo continua) e volta sozinha abaixo de 90%. Cada limpeza fica no evento, no alerta e na auditoria. A cota do cliente só gera alerta (90% e 100%). Escrita de 64 KiB acima de 1 s abre o alerta de **disco lento**.
+- **Buracos na gravação:** a conferência de cada segmento detecta trechos sem vídeo dentro do arquivo (quadros descartados numa travada de disco). Eles aparecem como lacuna na linha do tempo, dividem a exportação e geram evento. A fila do gravador (`writeQueueSize: 8192`) aguenta travadas de disco de alguns minutos sem perder quadros.
+- **Servidores:** CPU, memória, disco do sistema, espera por disco (pressão de IO do kernel), tempo ligado e estado de API, worker, banco, Redis e servidor de mídia.
 - **Espaço:** 24 h ocupam cerca de **bitrate (Mbps) × 10,8 GB**. Ex.: 1,9 Mbps ≈ 20,5 GB.
 - **Sessão:** token de acesso de 15 min em memória e renovação por cookie httpOnly (30 dias), trocado a cada uso. Login bloqueia 15 min após 5 erros no mesmo e-mail (ou 20 no mesmo IP).
 

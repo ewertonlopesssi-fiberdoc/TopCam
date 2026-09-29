@@ -56,8 +56,13 @@ export const NAV: NavItem[] = [
   { href: "/ao-vivo", label: "Ao Vivo", icon: MonitorPlay, show: (a) => a.can("cameras.read") },
   { href: "/gravacoes", label: "Gravações", icon: Film, show: (a) => a.can("cameras.read") },
   { href: "/eventos", label: "Eventos e Alertas", icon: Siren, show: () => true },
-  { href: "/armazenamento", label: "Armazenamento", icon: HardDrive, show: (a) => a.isPlatform },
-  { href: "/servidores", label: "Servidores", icon: Server, show: (a) => a.isPlatform },
+  {
+    href: "/armazenamento",
+    label: "Armazenamento",
+    icon: HardDrive,
+    show: (a) => a.can("storage.read"),
+  },
+  { href: "/servidores", label: "Servidores", icon: Server, show: (a) => a.can("storage.read") },
   {
     href: "/relatorios",
     label: "Relatórios",

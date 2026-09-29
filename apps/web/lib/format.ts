@@ -147,6 +147,8 @@ export const AUDIT_LABELS: Record<string, string> = {
   "camera.playback_viewed": "Gravação assistida",
   "camera.export_requested": "Exportação de vídeo solicitada",
   "camera.exported": "Vídeo exportado (MP4 baixado)",
+  "storage.node_updated": "Limites do disco de vídeo alterados",
+  "storage.emergency_purge": "Limpeza de emergência (disco cheio)",
   "plan.updated": "Plano alterado",
   "settings.updated": "Configurações alteradas",
 };

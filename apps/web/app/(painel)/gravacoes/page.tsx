@@ -34,7 +34,11 @@ interface Summary {
   newest: string | null;
 }
 interface Timeline {
-  segments: Array<{ startedAt: string; endedAt: string }>;
+  segments: Array<{
+    startedAt: string;
+    endedAt: string;
+    holes?: Array<{ from: number; to: number }>;
+  }>;
   gaps: Gap[];
 }
 interface ExportGrant {
@@ -54,11 +58,23 @@ const JOIN_MS = 1000;
 function toSpans(segments: Timeline["segments"]): Span[] {
   const out: Span[] = [];
   for (const s of segments) {
-    const from = Date.parse(s.startedAt);
-    const to = Date.parse(s.endedAt);
-    const last = out.at(-1);
-    if (last && from - last.to <= JOIN_MS) last.to = Math.max(last.to, to);
-    else out.push({ from, to });
+    const start = Date.parse(s.startedAt);
+    const end = Date.parse(s.endedAt);
+    // Buracos internos (quadros perdidos) dividem o segmento em pedaços.
+    let cur = start;
+    const pieces: Span[] = [];
+    for (const h of s.holes ?? []) {
+      const hs = start + h.from * 1000;
+      const he = start + h.to * 1000;
+      if (hs > cur) pieces.push({ from: cur, to: hs });
+      cur = Math.max(cur, he);
+    }
+    if (cur < end) pieces.push({ from: cur, to: end });
+    for (const p of pieces) {
+      const last = out.at(-1);
+      if (last && p.from - last.to <= JOIN_MS) last.to = Math.max(last.to, p.to);
+      else out.push({ ...p });
+    }
   }
   return out;
 }

@@ -203,7 +203,8 @@ async function recordIngestState(
   await withScope(ctx.pool, PLATFORM, async (c) => {
     if (reachable) {
       await c.query(
-        `UPDATE ingest_nodes SET status = 'online', last_seen_at = now(), metrics = $1 WHERE name = 'ingest-01'`,
+        `UPDATE ingest_nodes SET status = 'online', last_seen_at = now(),
+                metrics = coalesce(metrics, '{}'::jsonb) || $1::jsonb WHERE name = 'ingest-01'`,
         [JSON.stringify(metrics)],
       );
     } else {

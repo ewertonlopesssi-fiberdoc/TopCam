@@ -30,6 +30,15 @@ const schema = z.object({
   CONNECT_TIMEOUT_S: z.coerce.number().positive().default(30),
   RECONCILE_INTERVAL_S: z.coerce.number().positive().default(60),
   PROBE_TIMEOUT_S: z.coerce.number().positive().default(15),
+  /** Vigia de disco (Fase 6): espaço, limites, limpeza de emergência e latência. */
+  STORAGE_CHECK_INTERVAL_S: z.coerce.number().positive().default(30),
+  /** Escrita de 64 KiB acima deste tempo abre o alerta de disco lento. */
+  STORAGE_SLOW_MS: z.coerce.number().positive().default(1000),
+  /** Intervalo das amostras guardadas (gráficos e previsão). */
+  STORAGE_SAMPLE_INTERVAL_S: z.coerce.number().positive().default(300),
+  /** Métricas do servidor (tela Servidores). */
+  HOST_METRICS_INTERVAL_S: z.coerce.number().positive().default(30),
+  API_READY_URL: z.string().default("http://api:3000/ready"),
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
   WORKER_ID: z.string().default(`worker-${hostname()}`),
 });

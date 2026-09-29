@@ -338,8 +338,13 @@ export async function playbackRoutes(app: FastifyInstance, loadCam: LoadCam): Pr
       PLATFORM,
       async (c) =>
         (
-          await c.query<{ s: Date; e: Date }>(
-            `SELECT greatest(started_at, $2) AS s, least(ended_at, $3) AS e
+          await c.query<{
+            s: Date;
+            e: Date;
+            start: Date;
+            holes: Array<{ from: number; to: number }> | null;
+          }>(
+            `SELECT greatest(started_at, $2) AS s, least(ended_at, $3) AS e, started_at AS start, holes
                FROM recording_segments
               WHERE camera_id = $1 AND state = 'verified' AND ended_at > $2 AND started_at < $3
               ORDER BY started_at`,
@@ -347,8 +352,21 @@ export async function playbackRoutes(app: FastifyInstance, loadCam: LoadCam): Pr
           )
         ).rows,
     );
-    const out: Part[] = [];
+    // Buracos internos (quadros perdidos) dividem o segmento em pedaços.
+    const pieces: Array<{ s: Date; e: Date }> = [];
     for (const r of rows) {
+      let cur = r.s.getTime();
+      for (const h of r.holes ?? []) {
+        const hs = r.start.getTime() + h.from * 1000;
+        const he = r.start.getTime() + h.to * 1000;
+        if (he <= cur || hs >= r.e.getTime()) continue;
+        if (hs > cur) pieces.push({ s: new Date(cur), e: new Date(hs) });
+        cur = Math.max(cur, he);
+      }
+      if (cur < r.e.getTime()) pieces.push({ s: new Date(cur), e: r.e });
+    }
+    const out: Part[] = [];
+    for (const r of pieces) {
       const last = out.at(-1);
       if (last && r.s.getTime() - last.to.getTime() <= JOIN_TOLERANCE_MS) {
         if (r.e > last.to) last.to = r.e;

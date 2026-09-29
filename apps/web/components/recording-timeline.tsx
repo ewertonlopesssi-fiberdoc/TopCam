@@ -11,6 +11,8 @@ export interface Gap {
   from: string;
   to: string;
   seconds: number;
+  /** Quadros perdidos dentro de um segmento (ex.: disco travado). */
+  internal?: boolean;
 }
 
 const ZOOMS = [
@@ -144,7 +146,12 @@ export function RecordingTimeline({
             />
           ))}
         {gaps
-          .map((g) => ({ from: Date.parse(g.from), to: Date.parse(g.to), s: g.seconds }))
+          .map((g) => ({
+            from: Date.parse(g.from),
+            to: Date.parse(g.to),
+            s: g.seconds,
+            internal: g.internal,
+          }))
           .filter((g) => g.to > winStart && g.from < winEnd)
           .map((g) => (
             <div
@@ -154,7 +161,7 @@ export function RecordingTimeline({
                 left: `${pct(g.from)}%`,
                 width: `${Math.max(pct(g.to) - pct(g.from), 0.3)}%`,
               }}
-              title={`Lacuna de ${fmtDuration(g.s)}: ${fmtClock(g.from)} – ${fmtClock(g.to)}`}
+              title={`${g.internal ? "Quadros perdidos" : "Lacuna"} de ${fmtDuration(g.s)}: ${fmtClock(g.from)} – ${fmtClock(g.to)}`}
               data-testid="timeline-gap"
             />
           ))}

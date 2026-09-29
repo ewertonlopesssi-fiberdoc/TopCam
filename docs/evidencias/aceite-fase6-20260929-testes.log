@@ -1,0 +1,60 @@
+ Container topcam-postgres-1 Running 
+ Container topcam-redis-1 Running 
+ Container topcam-postgres-1 Waiting 
+ Container topcam-redis-1 Waiting 
+ Container topcam-redis-1 Healthy 
+ Container topcam-postgres-1 Healthy 
+ Container topcam-tests-run-39ae70dc294b Creating 
+ Container topcam-tests-run-39ae70dc294b Created 
+
+> topcam@0.1.0 lint /app
+> eslint .
+
+
+> topcam@0.1.0 test /app
+> vitest run
+
+
+ RUN  v5.0.2 /app
+
+ ✓ |unit| packages/shared/test/shared.unit.test.ts (17 tests) 80ms
+ ✓ |unit| apps/worker/test/worker.unit.test.ts (6 tests) 1030ms
+   ✓ conferência de segmento: ffprobe (1)
+     ✓ tempo esgotado vira falha passageira com mensagem clara (disco travado) 1016ms
+ ✓ |integration| apps/api/test/phase2.int.test.ts (19 tests) 5051ms
+   ✓ autenticação (6)
+     ✓ bloqueia após 5 tentativas erradas no mesmo e-mail 495ms
+     ✓ primeiro acesso exige troca de senha antes de usar a API 477ms
+   ✓ cadastros, papéis e isolamento (13)
+     ✓ administrador cria usuários do cliente com senha temporária 602ms
+     ✓ administrador do cliente só gerencia o próprio cliente 624ms
+     ✓ desativar usuário e suspender cliente cortam o acesso na hora 358ms
+     ✓ excluir usuário corta o acesso, some da lista e libera o e-mail 708ms
+ ✓ |integration| apps/worker/test/storage.int.test.ts (13 tests) 3680ms
+   ✓ vigia de disco (9)
+     ✓ 95%: apaga o mais antigo primeiro, até ~90%, protegendo a última hora 356ms
+     ✓ nada apagável (tudo recente): gravação para, com reconciliação; volta com espaço 312ms
+     ✓ disco lento: alerta acima de 1 s, resolvido após ~5 min estável 322ms
+   ✓ buracos dentro de segmentos (2)
+     ✓ conferência de arquivo real com 4 s sem vídeo: lacuna na linha do tempo e evento 527ms
+ ✓ |integration| apps/api/test/phase5.int.test.ts (8 tests) 2433ms
+ ✓ |integration| apps/worker/test/worker.int.test.ts (13 tests) 2600ms
+   ✓ poller de status (5)
+     ✓ recupera câmera transmitindo, detecta vídeo parado e queda 1392ms
+ ✓ |integration| apps/api/test/phase3.int.test.ts (10 tests) 2073ms
+ ✓ |integration| apps/worker/test/recordings.int.test.ts (10 tests) 2089ms
+   ✓ conferência de segmentos (3)
+     ✓ segmento válido vira verified (tamanho, SHA-256, codecs, duração) e a câmera passa a gravando 318ms
+     ✓ registra a lacuna entre segmentos uma única vez 304ms
+ ✓ |integration| apps/api/test/phase4.int.test.ts (6 tests) 2137ms
+   ✓ resumo e linha do tempo (2)
+     ✓ mostram só segmentos conferidos, com lacunas; exigem permissão de reprodução 731ms
+ ✓ |integration| apps/api/test/phase6.int.test.ts (5 tests) 2504ms
+ ✓ |integration| apps/api/test/api.int.test.ts (13 tests) 1148ms
+ ✓ |integration| packages/db/test/db.int.test.ts (11 tests) 963ms
+
+ Test Files  12 passed (12)
+      Tests  131 passed (131)
+   Start at  15:12:13
+   Duration  32.00s (tests 86%, import 10%, transform 4%)
+

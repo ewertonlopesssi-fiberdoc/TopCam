@@ -23,7 +23,9 @@ import {
   scanRecordings,
   verifySegmentJob,
 } from "./jobs/recordings.js";
+import { collectHostMetrics, newHostState } from "./jobs/host.js";
 import { reconcileMediaServer } from "./jobs/reconcile.js";
+import { checkStorage, newStorageState } from "./jobs/storage.js";
 import { runFfprobe } from "./lib/ffprobe.js";
 import { guardLiveSessions } from "./live-guard.js";
 import { newPollerState, pollOnce } from "./poller.js";
@@ -156,6 +158,18 @@ every(env.RECORDING_SCAN_INTERVAL_S, "recording-scan", async () => {
   if (h.stalled || h.stopped) log.warn(h, "saúde da gravação");
 });
 every(env.RETENTION_INTERVAL_S, "retention", () => applyRetention(ctx));
+
+// Armazenamento (Fase 6): limites 70/85/95%, limpeza de emergência, latência, cotas.
+const storageState = newStorageState();
+every(env.STORAGE_CHECK_INTERVAL_S, "storage", async () => {
+  const r = await checkStorage(ctx, storageState);
+  if (r.purgedSegments || r.blocked.length) {
+    log.warn(r, "armazenamento");
+    wakeAll();
+  }
+});
+const hostState = newHostState();
+every(env.HOST_METRICS_INTERVAL_S, "host-metrics", () => collectHostMetrics(ctx, hostState));
 
 every(60, "housekeeping", async () => {
   const n = await withScope(pool, PLATFORM, (c) => recoverStaleJobs(c));

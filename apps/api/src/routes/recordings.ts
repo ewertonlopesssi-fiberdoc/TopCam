@@ -145,9 +145,11 @@ export async function recordingRoutes(app: FastifyInstance): Promise<void> {
             sizeBytes: string;
             videoCodec: string | null;
             audioCodec: string | null;
+            holes: Array<{ from: number; to: number }> | null;
           }>(
             `SELECT id::text, started_at AS "startedAt", ended_at AS "endedAt", duration_ms AS "durationMs",
-                  size_bytes::text AS "sizeBytes", video_codec AS "videoCodec", audio_codec AS "audioCodec"
+                  size_bytes::text AS "sizeBytes", video_codec AS "videoCodec", audio_codec AS "audioCodec",
+                  holes
              FROM recording_segments
             WHERE camera_id = $1 AND state = 'verified' AND ended_at > $2 AND started_at < $3
             ORDER BY started_at
@@ -156,7 +158,16 @@ export async function recordingRoutes(app: FastifyInstance): Promise<void> {
           )
         ).rows,
     );
-    const gaps: Array<{ from: string; to: string; seconds: number }> = [];
+    const gaps: Array<{ from: string; to: string; seconds: number; internal?: true }> = [];
+    // Buracos dentro de segmentos (quadros perdidos; Fase 6).
+    for (const s of segments)
+      for (const h of s.holes ?? [])
+        gaps.push({
+          from: new Date(s.startedAt.getTime() + h.from * 1000).toISOString(),
+          to: new Date(s.startedAt.getTime() + h.to * 1000).toISOString(),
+          seconds: Math.round((h.to - h.from) * 10) / 10,
+          internal: true,
+        });
     for (let i = 1; i < segments.length; i++) {
       const a = segments[i - 1]!;
       const b = segments[i]!;
@@ -168,10 +179,15 @@ export async function recordingRoutes(app: FastifyInstance): Promise<void> {
           seconds: Math.round(ms / 100) / 10,
         });
     }
+    gaps.sort((a, b) => a.from.localeCompare(b.from));
     return {
       from: from.toISOString(),
       to: to.toISOString(),
-      segments: segments.map((s) => ({ ...s, sizeBytes: Number(s.sizeBytes) })),
+      segments: segments.map((s) => ({
+        ...s,
+        holes: s.holes ?? [],
+        sizeBytes: Number(s.sizeBytes),
+      })),
       gaps,
     };
   });

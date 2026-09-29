@@ -116,6 +116,34 @@ export async function verifySegmentJob(ctx: WorkerContext, job: JobRow): Promise
     }),
   );
   if (res?.recordingStarted) ctx.log.info({ camera: seg.camera_id }, "câmera gravando");
+  const holes = probe.holes ?? [];
+  if (holes.length) {
+    // Quadros perdidos no meio do segmento (ex.: disco travado): vira lacuna na linha
+    // do tempo e evento, mesmo com o segmento "inteiro" no índice.
+    const start = seg.started_at.getTime();
+    await withScope(ctx.pool, PLATFORM, async (c) => {
+      await c.query("UPDATE recording_segments SET holes = $2 WHERE id = $1", [
+        seg.id,
+        JSON.stringify(holes),
+      ]);
+      for (const h of holes)
+        await insertCameraEvent(c, {
+          tenantId: seg.tenant_id,
+          cameraId: seg.camera_id,
+          type: "recording_gap",
+          severity: "warning",
+          message: `Trecho de ${(h.to - h.from).toFixed(1).replace(".", ",")} s sem vídeo dentro de um segmento (quadros perdidos na gravação)`,
+          data: {
+            kind: "internal",
+            gap_from: new Date(start + h.from * 1000).toISOString(),
+            gap_to: new Date(start + h.to * 1000).toISOString(),
+            gap_seconds: Math.round((h.to - h.from) * 10) / 10,
+            segment: seg.id,
+          },
+        });
+    });
+    ctx.log.warn({ segment: seg.id, holes }, "segmento com buraco (quadros perdidos)");
+  }
 }
 
 // ------------------------------------------------------------------ varredura
