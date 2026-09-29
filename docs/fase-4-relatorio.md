@@ -85,7 +85,7 @@ Na mesma VM, `recording:status` mostrou a TWG 6608 **gravando**: 24 segmentos, 2
 
 | Item | Situação | Como validar |
 |---|---|---|
-| VM Debian no Proxmox | Não executado | `scripts/accept-phase4.sh` deve dar 10/10 (~15 min) |
+| VM Debian no Proxmox | ✅ **9/9 (R6 pulado)** em 28/09 às 23:56. O R6 passou na 1ª execução (23:13) | — |
 | **Retenção real de 24 h** | O aceite prova o expurgo adiantando a validade | Após 24 h e 30 h com a TWG gravando, `recording:status` deve mostrar o mais antigo em ~24 h e o espaço estável (~20 GB) |
 | Gravação da TWG 6608 | Sem a câmera aqui | Ao atualizar, ela começa a gravar sozinha (já está marcada). Em até ~2 min deve aparecer "Gravando" nos detalhes |
 | Disco cheio | Fica para a Fase 6 (cota, alertas 70/85/95% e parada controlada) | — |
