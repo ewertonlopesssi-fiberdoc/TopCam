@@ -41,6 +41,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     },
     trustProxy: true,
     bodyLimit: 64 * 1024,
+    // Links de exportação levam o token (~300 caracteres) no caminho.
+    routerOptions: { maxParamLength: 1000 },
   });
 
   app.decorate("deps", {

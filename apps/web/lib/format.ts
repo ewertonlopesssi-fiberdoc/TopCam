@@ -1,4 +1,44 @@
-const TZ = "America/Sao_Paulo";
+export const TZ = "America/Sao_Paulo";
+
+/** Diferença (ms) entre o horário de parede no fuso TZ e o UTC, no instante dado. */
+export function tzOffsetMs(ms: number, tz = TZ): number {
+  const wall = new Date(ms).toLocaleString("sv-SE", { timeZone: tz, hour12: false });
+  return Date.parse(`${wall.replace(" ", "T")}Z`) - Math.floor(ms / 1000) * 1000;
+}
+
+/** "AAAA-MM-DDThh:mm[:ss]" no fuso TZ → instante (ms). */
+export function zonedToMs(local: string, tz = TZ): number {
+  const asUtc = Date.parse(`${local.length === 16 ? `${local}:00` : local}Z`);
+  if (Number.isNaN(asUtc)) return NaN;
+  let ms = asUtc - tzOffsetMs(asUtc, tz);
+  ms = asUtc - tzOffsetMs(ms, tz); // acerta perto de mudança de horário
+  return ms;
+}
+
+/** Instante → "AAAA-MM-DDThh:mm:ss" no fuso TZ (campos datetime-local). */
+export function msToZoned(ms: number, tz = TZ): string {
+  return new Date(ms).toLocaleString("sv-SE", { timeZone: tz, hour12: false }).replace(" ", "T");
+}
+
+/** Dia (AAAA-MM-DD) do instante no fuso TZ. */
+export function dayOf(ms: number, tz = TZ): string {
+  return msToZoned(ms, tz).slice(0, 10);
+}
+
+/** hh:mm:ss no fuso TZ. */
+export function fmtClock(ms: number, tz = TZ): string {
+  return msToZoned(ms, tz).slice(11, 19);
+}
+
+/** Duração legível: 45 s, 12 min, 3 h 05 min. */
+export function fmtDuration(seconds: number): string {
+  const s = Math.round(seconds);
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  const h = Math.floor(s / 3600);
+  const m = Math.round((s % 3600) / 60);
+  return m ? `${h} h ${String(m).padStart(2, "0")} min` : `${h} h`;
+}
 
 export function fmtDateTime(value?: string | null): string {
   if (!value) return "—";
@@ -104,6 +144,9 @@ export const AUDIT_LABELS: Record<string, string> = {
   "camera.deleted": "Câmera excluída",
   "camera.stream_key_viewed": "Chave RTMP exibida",
   "camera.stream_key_rotated": "Chave RTMP trocada",
+  "camera.playback_viewed": "Gravação assistida",
+  "camera.export_requested": "Exportação de vídeo solicitada",
+  "camera.exported": "Vídeo exportado (MP4 baixado)",
   "plan.updated": "Plano alterado",
   "settings.updated": "Configurações alteradas",
 };

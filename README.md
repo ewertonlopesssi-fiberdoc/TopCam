@@ -4,7 +4,7 @@ Plataforma multiempresa de câmeras IP: recebe câmeras por **RTMP push** (cada 
 
 O laboratório roda numa única VM Debian no Proxmox (disco de 25 GB para o sistema + 35 GB para vídeo). Todos os serviços ficam em contêineres separados, para que a migração ao servidor dedicado mude apenas configuração e escala.
 
-> **Estado atual: Fase 4 — gravação e retenção.** Painel com login, papéis, permissões por câmera, cadastros, ao vivo (WebRTC e HLS) e gravação contínua das câmeras marcadas, com conferência de cada segmento e retenção. A reprodução no painel (linha do tempo, player, exportação) chega na Fase 5; as telas das fases seguintes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
+> **Estado atual: Fase 5 — gravações.** Painel com login, papéis, permissões por câmera, cadastros, ao vivo (WebRTC e HLS), gravação contínua das câmeras marcadas (conferência de cada segmento e retenção) e a tela **Gravações**: calendário, linha do tempo com as lacunas, player com velocidades e exportação MP4 auditada. As telas das fases seguintes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
 
 ---
 
@@ -77,6 +77,7 @@ Navegador ◄──── mídia WebRTC :8189 (UDP/TCP) ──── mediamtx
    scripts/accept-phase2.sh     # login, isolamento, permissões, auditoria, ~3 min
    scripts/accept-phase3.sh     # ao vivo das 5 câmeras (HLS, WebRTC, segurança), ~3 min
    scripts/accept-phase4.sh     # gravação, lacunas, reinícios e retenção, ~15 min
+   scripts/accept-phase5.sh     # reprodução, segurança, permissões e exportação MP4, ~10 min
    ```
 6. **Entrar no painel:** `http://<PUBLIC_HOST>` com `ADMIN_EMAIL` e `ADMIN_INITIAL_PASSWORD` do `.env`. No primeiro acesso o sistema exige a troca da senha (mínimo 10 caracteres, letras e números, sem conter o e-mail).
 
@@ -118,6 +119,9 @@ Postgres, Redis, API do MediaMTX, RTSP, HLS e a sinalização WebRTC **não** s�
 - **Ao Vivo:** árvore Empresa › Local › Grupo, mosaico 1/4/9/16, tela cheia, foco numa câmera (duplo clique ou clique na árvore), pausa, som, captura de imagem. "Automático" tenta **WebRTC** (menor atraso) e, se não conectar, usa **HLS**. O ícone de monitor na lista de Câmeras abre a câmera ao vivo.
 - **Segurança do ao vivo:** o navegador recebe só um endereço temporário `/live/<token>/…` (2 h), ligado ao usuário, à sessão e à câmera. A chave RTMP e o caminho interno nunca chegam ao navegador. O gateway reconfere o acesso a cada pedido (cache de 5 s); no WebRTC, o worker encerra a cada 10 s as conexões cujo acesso foi retirado (logout, usuário ou cliente desativado, permissão ou câmera retirada). Abrir o ao vivo fica na auditoria (um registro por usuário e câmera a cada 30 min).
 - **Gravação:** grava continuamente só as câmeras com **gravação** marcada no cadastro, em segmentos de 60 s (`cam/<id da câmera>/<início UTC>.mp4` no disco de vídeo). Cada segmento é conferido pelo worker (tamanho, SHA-256 e ffprobe) antes de contar: só então a câmera aparece como **Gravando**. Queda de sinal vira **lacuna** registrada (evento). Os segmentos vencidos pela retenção da câmera (24 h por padrão) são apagados do disco e do índice a cada minuto. Uma varredura da pasta indexa o que os avisos do servidor de mídia não informaram (reinício, API fora do ar) e alerta se aparecer gravação de câmera só ao vivo. Os detalhes da câmera mostram horas disponíveis, espaço usado e lacunas. A chave geral fica em **Configurações** (desliga todas as gravações de uma vez).
+- **Gravações:** árvore de câmeras com gravação, calendário do mês (dias com gravação em destaque), linha do tempo do dia (24 h, 6 h ou 1 h) com os trechos gravados, as **lacunas de sinal** em vermelho e o cursor da reprodução (clique para ir). O player toca os trechos em sequência, **pula as lacunas sozinho**, tem velocidades 0,5x a 8x, ±10 s, som e tela cheia, e mostra a data e hora do quadro. **Início/Fim + Buscar** vai direto a um horário.
+- **Exportação MP4:** com a permissão **pode exportar** (por câmera), **Baixar MP4** gera o arquivo do trecho Início–Fim (máximo `EXPORT_MAX_S`, 1 h por padrão) com o nome `CAM-001_AAAA-MM-DD_hh-mm-ss_Nmin.mp4`. Se o trecho tiver lacunas, os blocos gravados vêm emendados num arquivo só. O pedido e o download ficam na **auditoria**; o link vale 10 min e é ligado ao usuário e à sessão.
+- **Segurança das gravações:** o navegador recebe só um endereço temporário `/playback/<token>/get?…` ligado ao usuário, à sessão e à câmera, que o gateway reconfere a cada pedido (permissão **pode reproduzir**). Só `/get` em fMP4 de até 1 h é aceito; o servidor de reprodução (porta 9996) fica só na rede interna e exige credencial.
 - **Espaço:** 24 h ocupam cerca de **bitrate (Mbps) × 10,8 GB**. Ex.: 1,9 Mbps ≈ 20,5 GB.
 - **Sessão:** token de acesso de 15 min em memória e renovação por cookie httpOnly (30 dias), trocado a cada uso. Login bloqueia 15 min após 5 erros no mesmo e-mail (ou 20 no mesmo IP).
 
@@ -205,6 +209,8 @@ E2E_ADMIN_NEW_PASSWORD='<senha atual do admin>' pnpm exec playwright test
 ```
 
 **Ao vivo (E2E):** com as 5 câmeras da Empresa Alfa transmitindo (`scripts/accept-phase3.sh --keep-tx`), acrescente `E2E_LIVE=1`. É preciso um navegador com H.264 — o Chromium do Playwright não tem o codec; use o Google Chrome com `PW_CHROMIUM_PATH=/usr/bin/google-chrome` (ou o caminho no seu sistema). O teste mede a latência de ponta a ponta lendo, na tela, o relógio que o transmissor desenha no vídeo da CAM-001 (`TX_CLOCK=1`) e grava o resultado em `reports/latencia-ao-vivo.json`.
+
+**Gravações (E2E):** com a CAM-001 da Empresa Alfa gravando pelo transmissor com relógio (`TX_CLOCK=1`) há pelo menos 6 min, acrescente `E2E_RECORDING=1` (também com o Google Chrome). O teste reproduz, confere a precisão do horário mostrado lendo o relógio desenhado no vídeo, usa Buscar, salta uma lacuna (se houver nas últimas 6 h), mede a velocidade 4x, exporta 1 min (ffprobe) e confere a auditoria e as permissões do visualizador.
 
 Se o administrador ainda estiver no primeiro acesso, informe também `E2E_ADMIN_PASSWORD=<ADMIN_INITIAL_PASSWORD>`: o teste faz a troca pela tela, definindo a senha de `E2E_ADMIN_NEW_PASSWORD`. Use um ambiente de teste: o fluxo cria clientes e usuários fictícios.
 

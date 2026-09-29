@@ -17,6 +17,14 @@ export interface LiveClaims {
   u: string;
   s: string;
   e: number;
+  /**
+   * Finalidade (Fase 5). Ausente = ao vivo; "p" = reprodução de gravações;
+   * "x" = exportação MP4 de um trecho (a = início em ms, d = duração em s).
+   * Um token de uma finalidade nunca vale para outra.
+   */
+  k?: "p" | "x";
+  a?: number;
+  d?: number;
 }
 
 const PREFIX = "v1";

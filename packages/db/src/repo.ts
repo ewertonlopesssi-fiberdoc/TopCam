@@ -312,8 +312,18 @@ export async function getSetting<T>(client: PoolClient, key: string, fallback: T
  */
 export async function liveAccessAllowed(
   client: PoolClient,
-  a: { userId: string; sessionId: string; cameraId: string; grantedRoles: readonly string[] },
+  a: {
+    userId: string;
+    sessionId: string;
+    cameraId: string;
+    grantedRoles: readonly string[];
+    /** Direito exigido de quem vê só câmeras concedidas (padrão: ao vivo). */
+    right?: "live" | "playback" | "export";
+  },
 ): Promise<boolean> {
+  const column = { live: "p.can_live", playback: "p.can_playback", export: "p.can_export" }[
+    a.right ?? "live"
+  ];
   const { rowCount } = await client.query(
     `SELECT 1
        FROM users u
@@ -328,7 +338,7 @@ export async function liveAccessAllowed(
         AND (u.tenant_id IS NULL OR (ut.status = 'active' AND c.tenant_id = u.tenant_id))
         AND (NOT (r.key = ANY($4::text[])) OR EXISTS (
               SELECT 1 FROM user_camera_permissions p
-               WHERE p.user_id = u.id AND p.camera_id = c.id AND p.can_live))`,
+               WHERE p.user_id = u.id AND p.camera_id = c.id AND ${column}))`,
     [a.userId, a.sessionId, a.cameraId, a.grantedRoles],
   );
   return (rowCount ?? 0) > 0;

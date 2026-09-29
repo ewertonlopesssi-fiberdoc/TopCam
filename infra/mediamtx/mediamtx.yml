@@ -34,8 +34,11 @@ metrics: true
 metricsAddress: :9998
 pprof: false
 
-# Reprodução de gravações: Fase 5.
-playback: false
+# Reprodução de gravações (Fase 5): servidor interno (9996). O navegador acessa só
+# via gateway (/playback/<token>/...), e a exportação MP4 passa pela API (auditada).
+playback: true
+playbackAddress: :9996
+playbackAllowOrigins: []
 
 # RTSP somente interno (validação do stream pelo worker).
 rtsp: true

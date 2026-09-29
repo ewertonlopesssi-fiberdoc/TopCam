@@ -23,7 +23,7 @@ export async function guardLiveSessions(
     let ok = false;
     let reason = "no_token";
     const v = token ? verifyLiveToken(ctx.env.JWT_SECRET, token, 0) : null;
-    if (v?.ok) {
+    if (v?.ok && !v.claims.k) {
       const { claims } = v;
       const key = `${claims.u}:${claims.s}:${claims.c}`;
       if (!cache.has(key))
@@ -42,7 +42,7 @@ export async function guardLiveSessions(
       ok = cache.get(key)! && s.path === `cam/${claims.c}`;
       reason = ok ? "" : "revoked";
     } else if (v) {
-      reason = v.reason;
+      reason = v.ok ? "wrong_kind" : v.reason;
     }
     if (!ok) {
       await ctx.mediamtx.kickWebrtcSession(s.id).catch(() => undefined);

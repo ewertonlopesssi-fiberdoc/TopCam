@@ -4,6 +4,7 @@
 #
 # Rotas:
 #   /api/*          → api (painel e app)
+#   /playback/<token>/get → gravações (reprodução), conferido pela API
 #   /live/<token>/* → ao vivo: a API valida o token (forward_auth) e devolve o
 #                     caminho interno cam/<id>; só então o pedido vai ao MediaMTX
 #                     (HLS :8888 ou WHEP :8889) com o token do gateway.
@@ -35,7 +36,35 @@
 	}
 
 	handle /api/* {
+		# Links de exportação levam o token no caminho: fora do log de acesso.
+		@export path /api/v1/exports/*
+		log_skip @export
 		reverse_proxy api:3000
+	}
+
+	# ---------------------------------------------------------------- gravações
+	# /playback/<token>/get?path=cam/<id>&start=...&duration=...&format=fmp4
+	# A API confere o token (reprodução), a câmera do parâmetro "path", o intervalo
+	# e a permissão "pode reproduzir"; só então o pedido vai ao servidor de
+	# reprodução interno do MediaMTX (:9996).
+	handle /playback/* {
+		log_skip
+		request_header -X-Media-Path
+		route {
+			forward_auth api:3000 {
+				uri /internal/playback/auth?secret={$MEDIA_HOOK_SECRET}
+				copy_headers X-Media-Path
+			}
+			rewrite * {http.request.header.X-Media-Path}?{query}
+			header Cache-Control "no-store"
+			reverse_proxy mediamtx:9996 {
+				header_up Authorization "Bearer {$MEDIA_GATEWAY_TOKEN}"
+				header_up -Cookie
+				header_up -X-Media-Path
+				header_down -WWW-Authenticate
+				header_down -Set-Cookie
+			}
+		}
 	}
 
 	# ---------------------------------------------------------------- ao vivo

@@ -102,11 +102,12 @@ export async function mediamtxRoutes(app: FastifyInstance): Promise<void> {
       // Gateway do ao vivo: token próprio, só cam/<id> e só HLS/WebRTC. O usuário final já
       // foi autorizado pela API (forward_auth) antes de o gateway chegar aqui.
       if (
-        body.action === "read" &&
         body.token &&
         safeEqual(body.token, env.MEDIA_GATEWAY_TOKEN) &&
         CAM_PATH.test(body.path) &&
-        (body.protocol === "hls" || body.protocol === "webrtc")
+        ((body.action === "read" && (body.protocol === "hls" || body.protocol === "webrtc")) ||
+          // Reprodução de gravações (Fase 5): o usuário já foi autorizado pelo gateway.
+          body.action === "playback")
       )
         return reply.code(200).send();
       req.log.warn(

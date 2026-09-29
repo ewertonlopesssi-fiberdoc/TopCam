@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { db } from "../lib/ctx.js";
 import { badRequest, notFound, parseBody, uuid } from "../lib/http.js";
+import { playbackRoutes } from "./playback.js";
 
 /**
  * Gravações (Fase 4): resumo e índice dos segmentos de uma câmera.
@@ -38,8 +39,13 @@ export async function recordingRoutes(app: FastifyInstance): Promise<void> {
             lastDurableSegmentAt: string | null;
             retentionHours: number | null;
             status: string;
+            name: string;
+            canExport: boolean;
           }>(
-            `SELECT c.id, c.code, c.recording_enabled AS "recordingEnabled", c.status,
+            `SELECT c.id, c.code, c.name, c.recording_enabled AS "recordingEnabled", c.status,
+                  ($2::boolean = false OR EXISTS (
+                    SELECT 1 FROM user_camera_permissions p
+                     WHERE p.camera_id = c.id AND p.user_id = $3 AND p.can_export)) AS "canExport",
                   c.last_durable_segment_at AS "lastDurableSegmentAt",
                   rp.retention_hours AS "retentionHours"
              FROM cameras c LEFT JOIN retention_policies rp ON rp.id = c.retention_policy_id
@@ -98,7 +104,9 @@ export async function recordingRoutes(app: FastifyInstance): Promise<void> {
       return {
         cameraId: id,
         code: cam.code,
+        name: cam.name,
         status: cam.status,
+        canExport: cam.canExport,
         recordingEnabled: cam.recordingEnabled,
         globalEnabled,
         retentionHours: cam.retentionHours ?? (cam.recordingEnabled ? 24 : null),
@@ -167,4 +175,7 @@ export async function recordingRoutes(app: FastifyInstance): Promise<void> {
       gaps,
     };
   });
+
+  // Reprodução e exportação usam a mesma regra de acesso (pode reproduzir / pode exportar).
+  await playbackRoutes(app, loadCam);
 }

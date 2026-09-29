@@ -43,6 +43,12 @@ const schema = z.object({
   LIVE_TOKEN_TTL_S: z.coerce.number().int().min(60).default(7200),
   /** Cache da validação do token no gateway (segundos). Revogações valem em até este tempo. */
   LIVE_AUTH_CACHE_S: z.coerce.number().int().min(0).default(5),
+
+  // ---- reprodução e exportação (Fase 5)
+  /** Servidor de reprodução interno do MediaMTX. */
+  MEDIAMTX_PLAYBACK_URL: z.string().url().default("http://mediamtx:9996"),
+  /** Maior trecho exportável de uma vez (segundos). */
+  EXPORT_MAX_S: z.coerce.number().int().positive().default(3600),
 });
 
 export type Env = z.infer<typeof schema>;

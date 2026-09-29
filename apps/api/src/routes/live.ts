@@ -203,6 +203,8 @@ export async function liveRoutes(app: FastifyInstance): Promise<void> {
       const v = verifyLiveToken(env.JWT_SECRET, parsed.token);
       if (!v.ok) return deny(reply, 403, v.reason);
       const { claims } = v;
+      // Token de reprodução ou de exportação não vale para o ao vivo.
+      if (claims.k) return deny(reply, 403, "wrong_kind");
       // WHEP: a oferta precisa trazer o próprio token na query (t=). O MediaMTX guarda a
       // query da sessão WebRTC, e o worker usa o token para encerrar sessões cuja
       // permissão foi revogada (a mídia WebRTC não passa mais pelo gateway).
