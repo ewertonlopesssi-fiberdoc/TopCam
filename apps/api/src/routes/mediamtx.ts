@@ -3,8 +3,10 @@ import {
   enqueueJob,
   findCameraByKeyHash,
   insertCameraEvent,
+  markSegmentComplete,
   normalizeIp,
   transitionCamera,
+  upsertSegmentStart,
   withScope,
   type CameraRow,
 } from "@topcam/db";
@@ -12,6 +14,8 @@ import {
   JOBS_WAKE_CHANNEL,
   fingerprint,
   hashStreamKey,
+  parseMtxDuration,
+  parseSegmentPath,
   safeEqual,
   streamKeyFromPath,
 } from "@topcam/shared";
@@ -40,6 +44,12 @@ const hookBody = z.object({
   path: z.string(),
   source_type: z.string().optional().default(""),
   source_id: z.string().optional().default(""),
+});
+
+const segmentBody = z.object({
+  path: z.string(),
+  segment_path: z.string().min(1),
+  segment_duration: z.string().optional().default(""),
 });
 
 const PUBLISH_PROTOCOLS = new Set(["rtmp", "rtmps"]);
@@ -234,6 +244,40 @@ export async function mediamtxRoutes(app: FastifyInstance): Promise<void> {
     });
     return reply.code(200).send();
   });
+
+  // ------------------------------------------------------------- gravação (Fase 4)
+  // Início e fim de cada segmento gravado em cam/<id>. A API só indexa; quem
+  // confere o arquivo (tamanho, SHA-256, ffprobe) é o worker (segment.verify).
+  app.post<{ Params: { event: string } }>(
+    "/internal/mediamtx/hooks/segment_:event",
+    async (req, reply) => {
+      if (!checkSecret(req, reply)) return;
+      const { event } = req.params;
+      if (event !== "create" && event !== "complete") return reply.code(404).send();
+      const parsed = segmentBody.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: "bad_request" });
+      const info = parseSegmentPath(parsed.data.segment_path, env.RECORDINGS_PATH);
+      if (!info || parsed.data.path !== `cam/${info.cameraId}`) {
+        req.log.warn({ path: parsed.data.path }, "segmento fora do padrão cam/<id>/<início>.mp4");
+        return reply.code(400).send({ error: "invalid_segment_path" });
+      }
+      const durationMs = parseMtxDuration(parsed.data.segment_duration);
+      const queued = await withScope(pool, PLATFORM, async (c) => {
+        const up = await upsertSegmentStart(c, info);
+        if (!up) return false;
+        if (event === "create") return false;
+        await markSegmentComplete(c, info.relPath, durationMs);
+        return enqueueJob(
+          c,
+          "segment.verify",
+          { segmentId: up.segment.id },
+          { dedupKey: `segment:${up.segment.id}`, maxAttempts: 5 },
+        );
+      });
+      if (queued) await wakeWorker();
+      return reply.code(204).send();
+    },
+  );
 
   app.post<{ Params: { event: string } }>("/internal/mediamtx/hooks/:event", async (req, reply) => {
     if (!checkSecret(req, reply)) return;

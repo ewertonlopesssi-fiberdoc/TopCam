@@ -274,6 +274,7 @@ export default function ConfiguracoesPage() {
   const [s, setS] = useState<Settings | null>(null);
   const [name, setName] = useState("");
   const [support, setSupport] = useState("");
+  const [recording, setRecording] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -285,11 +286,13 @@ export default function ConfiguracoesPage() {
         setS(r);
         setName(r.platformName);
         setSupport(r.supportEmail);
+        setRecording(r.recordingGloballyEnabled);
       })
       .catch(setError);
   }, [auth]);
 
   const u = auth.user!;
+  const recordingChanged = s !== null && recording !== s.recordingGloballyEnabled;
   return (
     <>
       <PageHeader
@@ -340,6 +343,28 @@ export default function ConfiguracoesPage() {
                     disabled={!auth.can("settings.write")}
                   />
                 </Field>
+                <label className="flex items-start gap-3 rounded-lg border border-line p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4"
+                    checked={recording}
+                    onChange={(e) => setRecording(e.target.checked)}
+                    disabled={!auth.can("settings.write")}
+                    aria-label="Gravação geral ligada"
+                  />
+                  <span>
+                    <span className="font-medium">Gravação geral ligada</span>
+                    <span className="block text-xs text-muted">
+                      Só gravam as câmeras com "gravação" marcada no cadastro. Desligar aqui para
+                      todas as gravações de uma vez; as já feitas seguem a retenção.
+                    </span>
+                    {recordingChanged && !recording && (
+                      <span className="mt-1 block text-xs font-medium text-red-600">
+                        Ao salvar, nenhuma câmera grava até a chave ser religada.
+                      </span>
+                    )}
+                  </span>
+                </label>
               </div>
               {auth.can("settings.write") && (
                 <button
@@ -348,7 +373,12 @@ export default function ConfiguracoesPage() {
                   onClick={async () => {
                     setBusy(true);
                     try {
-                      await api.put("/settings", { platformName: name, supportEmail: support });
+                      await api.put("/settings", {
+                        platformName: name,
+                        supportEmail: support,
+                        recordingGloballyEnabled: recording,
+                      });
+                      setS((cur) => (cur ? { ...cur, recordingGloballyEnabled: recording } : cur));
                       toast("Configurações salvas");
                     } catch (err) {
                       setError(err);
@@ -373,10 +403,7 @@ export default function ConfiguracoesPage() {
                         {s.rtmpServer}
                       </code>,
                     ],
-                    [
-                      "Gravação",
-                      s.recordingGloballyEnabled ? "Ligada" : "Desligada (ativada na Fase 4)",
-                    ],
+                    ["Gravação", s.recordingGloballyEnabled ? "Ligada" : "Desligada"],
                     [
                       "Sessão",
                       `token de ${s.sessionMinutes} min, renovação por até ${Math.round(s.refreshHours / 24)} dias`,

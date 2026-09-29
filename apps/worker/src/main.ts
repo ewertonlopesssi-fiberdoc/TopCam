@@ -4,6 +4,7 @@ import {
   completeJob,
   createPool,
   failJob,
+  pruneDeletedSegments,
   pruneJobs,
   recoverStaleJobs,
   withScope,
@@ -16,6 +17,12 @@ import { pino } from "pino";
 import { makeEncKey, redact, type WorkerContext } from "./context.js";
 import { loadEnv } from "./env.js";
 import { probeJob } from "./jobs/probe.js";
+import {
+  applyRetention,
+  checkRecordingHealth,
+  scanRecordings,
+  verifySegmentJob,
+} from "./jobs/recordings.js";
 import { reconcileMediaServer } from "./jobs/reconcile.js";
 import { runFfprobe } from "./lib/ffprobe.js";
 import { guardLiveSessions } from "./live-guard.js";
@@ -38,6 +45,7 @@ const handlers: Record<JobType, (job: JobRow) => Promise<void>> = {
   "mediamtx.reconcile": async () => {
     await reconcileMediaServer(ctx);
   },
+  "segment.verify": (job) => verifySegmentJob(ctx, job),
 };
 
 let stopping = false;
@@ -139,11 +147,26 @@ every(env.LIVE_GUARD_INTERVAL_S, "live-guard", async () => {
   await guardLiveSessions(ctx);
 });
 
+// Gravação: varredura da pasta (segmentos que os hooks não informaram) e retenção.
+every(env.RECORDING_SCAN_INTERVAL_S, "recording-scan", async () => {
+  const r = await scanRecordings(ctx);
+  if (r.indexed || r.missing || r.unexpected) log.info(r, "varredura de gravações");
+  if (r.queued) wakeAll();
+  const h = await checkRecordingHealth(ctx);
+  if (h.stalled || h.stopped) log.warn(h, "saúde da gravação");
+});
+every(env.RETENTION_INTERVAL_S, "retention", () => applyRetention(ctx));
+
 every(60, "housekeeping", async () => {
   const n = await withScope(pool, PLATFORM, (c) => recoverStaleJobs(c));
   if (n) log.warn({ n }, "tarefas presas devolvidas à fila");
 });
-every(3600, "prune", () => withScope(pool, PLATFORM, (c) => pruneJobs(c)));
+every(3600, "prune", () =>
+  withScope(pool, PLATFORM, async (c) => {
+    await pruneJobs(c);
+    await pruneDeletedSegments(c);
+  }),
+);
 
 log.info("worker iniciado");
 // Várias tarefas em paralelo (ex.: validar 5 câmeras que entram ao mesmo tempo).

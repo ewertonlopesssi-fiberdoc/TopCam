@@ -16,6 +16,14 @@ export const CAMERA_EVENT_TYPES = [
   "status_changed",
   "ingest_unreachable",
   "ingest_recovered",
+  // gravação (Fase 4)
+  "recording_started",
+  "recording_stopped",
+  "recording_stalled",
+  "recording_gap",
+  "segment_corrupt",
+  "segment_missing",
+  "unexpected_recording",
 ] as const;
 
 export type CameraEventType = (typeof CAMERA_EVENT_TYPES)[number];
@@ -23,7 +31,7 @@ export type CameraEventType = (typeof CAMERA_EVENT_TYPES)[number];
 export type EventSeverity = "info" | "warning" | "error" | "critical";
 
 /** Tipos de tarefas duráveis (`durable_jobs.type`). */
-export const JOB_TYPES = ["camera.probe", "mediamtx.reconcile"] as const;
+export const JOB_TYPES = ["camera.probe", "mediamtx.reconcile", "segment.verify"] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 /** Canal Redis usado para acordar o worker quando há tarefa nova. */

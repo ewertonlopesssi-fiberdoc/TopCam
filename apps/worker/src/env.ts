@@ -17,6 +17,12 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32),
   /** Intervalo da conferência das sessões WebRTC abertas (revogação de acesso). */
   LIVE_GUARD_INTERVAL_S: z.coerce.number().positive().default(10),
+  /** Varredura da pasta de gravações (segmentos não informados pelos hooks). */
+  RECORDING_SCAN_INTERVAL_S: z.coerce.number().positive().default(60),
+  /** Execução da retenção (apaga segmentos vencidos). */
+  RETENTION_INTERVAL_S: z.coerce.number().positive().default(60),
+  /** Sem segmento conferido há este tempo numa câmera "gravando" → alerta e volta a "ao vivo". */
+  RECORDING_STALL_S: z.coerce.number().positive().default(180),
   /** Diretório de gravações como o MediaMTX o enxerga (volume compartilhado). */
   RECORDINGS_PATH: z.string().default("/recordings"),
   POLL_INTERVAL_S: z.coerce.number().positive().default(5),

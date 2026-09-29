@@ -170,9 +170,10 @@ export async function seed(connectionString: string, opts: SeedOptions): Promise
          quota_bytes = COALESCE(EXCLUDED.quota_bytes, storage_nodes.quota_bytes)`,
       [opts.recordingsPath, opts.videoQuotaBytes ?? null],
     );
-    // Fase 1: gravação desligada globalmente até o indexador de segmentos existir (Fase 4).
+    // Chave geral da gravação: ligada desde a Fase 4 (indexação e retenção prontas).
+    // Só grava quem tem "gravação" marcada no cadastro. Desligável em Configurações.
     await client.query(
-      `INSERT INTO system_settings (key, value) VALUES ('recording.globally_enabled', 'false'::jsonb)
+      `INSERT INTO system_settings (key, value) VALUES ('recording.globally_enabled', 'true'::jsonb)
        ON CONFLICT (key) DO NOTHING`,
     );
 

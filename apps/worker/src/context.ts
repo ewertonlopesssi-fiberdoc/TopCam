@@ -7,6 +7,7 @@ import {
 } from "@topcam/shared";
 import type { Logger } from "pino";
 import type { WorkerEnv } from "./env.js";
+import type { FileProbe } from "./lib/ffprobe.js";
 
 export interface WorkerContext {
   env: WorkerEnv;
@@ -16,6 +17,8 @@ export interface WorkerContext {
   encKey: Buffer;
   /** Executa ffprobe; injetável nos testes. */
   runProbe: (url: string, timeoutS: number) => Promise<ProbeOutput>;
+  /** Confere um arquivo gravado com ffprobe; injetável nos testes. */
+  probeFile?: (file: string) => Promise<FileProbe>;
 }
 
 export interface ProbeStream {

@@ -248,7 +248,11 @@ describe("validação (probe)", () => {
 });
 
 describe("reconciliação do servidor de mídia", () => {
-  it("cria só o relay cam/<id> por câmera (entrada live/ usa os padrões), sem gravação na Fase 1", async () => {
+  it("cria só o relay cam/<id> por câmera (entrada live/ usa os padrões); com a gravação geral desligada nada grava", async () => {
+    await ownerQuery(
+      db,
+      "UPDATE system_settings SET value = 'false' WHERE key = 'recording.globally_enabled'",
+    );
     const r = await reconcileMediaServer(ctx);
     expect(r.added).toBe(6);
     expect(r.recording).toBe(0);

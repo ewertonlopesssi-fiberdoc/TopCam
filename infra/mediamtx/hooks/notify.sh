@@ -1,17 +1,26 @@
 #!/bin/sh
-# Notifica a API sobre mudanças de estado de um caminho do MediaMTX.
-# Uso (pelo MediaMTX): notify.sh online|offline
-# Variáveis fornecidas pelo MediaMTX: MTX_PATH, MTX_SOURCE_TYPE, MTX_SOURCE_ID.
+# Notifica a API sobre eventos do MediaMTX.
+# Uso (pelo MediaMTX): notify.sh online|offline|segment_create|segment_complete
+# Variáveis fornecidas pelo MediaMTX: MTX_PATH, MTX_SOURCE_TYPE, MTX_SOURCE_ID,
+#   MTX_SEGMENT_PATH e MTX_SEGMENT_DURATION (eventos de gravação).
 # Variáveis do contêiner: MEDIA_HOOK_SECRET, TOPCAM_API_URL.
+#
+# Se a API estiver fora do ar, o worker ainda indexa os segmentos pela varredura
+# periódica da pasta de gravações; nada se perde.
 
 EVENT="$1"
 case "$EVENT" in
-  online|offline) ;;
+  online|offline)
+    BODY=$(printf '{"path":"%s","source_type":"%s","source_id":"%s"}' \
+      "$MTX_PATH" "${MTX_SOURCE_TYPE:-}" "${MTX_SOURCE_ID:-}")
+    ;;
+  segment_create|segment_complete)
+    BODY=$(printf '{"path":"%s","segment_path":"%s","segment_duration":"%s"}' \
+      "$MTX_PATH" "${MTX_SEGMENT_PATH:-}" "${MTX_SEGMENT_DURATION:-}")
+    ;;
   *) echo "notify.sh: evento inválido: $EVENT" >&2; exit 2 ;;
 esac
 
-BODY=$(printf '{"path":"%s","source_type":"%s","source_id":"%s"}' \
-  "$MTX_PATH" "${MTX_SOURCE_TYPE:-}" "${MTX_SOURCE_ID:-}")
 URL="${TOPCAM_API_URL:-http://api:3000}/internal/mediamtx/hooks/${EVENT}?secret=${MEDIA_HOOK_SECRET}"
 
 i=0

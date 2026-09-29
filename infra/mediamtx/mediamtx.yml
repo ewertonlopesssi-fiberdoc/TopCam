@@ -80,12 +80,17 @@ pathDefaults:
   # Só caminhos cam/<id da câmera> gravam: o diretório nunca contém a chave.
   recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
   recordFormat: fmp4
+  # Cada parte (1 s) vai para o disco ao ser concluída: numa queda, perde-se no máximo ~1 s.
   recordPartDuration: 1s
+  # Segmentos de 60 s: cada um é conferido e indexado no banco pelo worker.
   recordSegmentDuration: 60s
-  # Retenção é controlada pelo worker a partir do índice no PostgreSQL (Fase 4).
+  # Retenção é controlada pelo worker a partir do índice no PostgreSQL (nunca pelo MediaMTX).
   recordDeleteAfter: 0s
   runOnOnline: /bin/sh /hooks/notify.sh online
   runOnOffline: /bin/sh /hooks/notify.sh offline
+  # Início e fim de cada segmento gravado → API (índice); o worker confere o arquivo.
+  runOnRecordSegmentCreate: /bin/sh /hooks/notify.sh segment_create
+  runOnRecordSegmentComplete: /bin/sh /hooks/notify.sh segment_complete
 
 paths:
   all_others:

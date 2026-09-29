@@ -132,10 +132,28 @@ services:
       retries: 6
       start_period: 20s
 
+  # Prepara a pasta de gravações: dono = usuário 1000, o mesmo do MediaMTX (que
+  # grava) e do worker (que confere e apaga pela retenção). Roda a cada subida.
+  storage-init:
+    # Mesma imagem da aplicação (construída pelos serviços api/worker); não constrói de novo.
+    image: topcam/app:${TOPCAM_VERSION:-0.1.0}
+    pull_policy: never
+    logging: *logging
+    restart: "no"
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - mkdir -p /recordings/cam && chown -R 1000:1000 /recordings && chmod 0750 /recordings
+    volumes:
+      - ${RECORDINGS_DIR:-./.data/recordings}:/recordings
+
   mediamtx:
     image: bluenviron/mediamtx:1.21.1-ffmpeg
     restart: unless-stopped
     logging: *logging
+    # Sem root: grava os arquivos como o usuário 1000 (o worker precisa apagá-los).
+    user: "1000:1000"
     environment:
       MTX_AUTHHTTPADDRESS: http://api:3000/internal/mediamtx/auth?secret=${MEDIA_HOOK_SECRET}
       # Endereço anunciado aos navegadores para a mídia WebRTC (porta 8189).
@@ -155,6 +173,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9997/v3/paths/list"]
       interval: 5s

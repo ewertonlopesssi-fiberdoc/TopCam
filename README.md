@@ -4,7 +4,7 @@ Plataforma multiempresa de câmeras IP: recebe câmeras por **RTMP push** (cada 
 
 O laboratório roda numa única VM Debian no Proxmox (disco de 25 GB para o sistema + 35 GB para vídeo). Todos os serviços ficam em contêineres separados, para que a migração ao servidor dedicado mude apenas configuração e escala.
 
-> **Estado atual: Fase 3 — ao vivo no navegador (WebRTC e HLS).** Painel com login, papéis, permissões por câmera, cadastros e a tela Ao Vivo. A gravação (Fase 4) ainda não está disponível; as telas das fases seguintes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
+> **Estado atual: Fase 4 — gravação e retenção.** Painel com login, papéis, permissões por câmera, cadastros, ao vivo (WebRTC e HLS) e gravação contínua das câmeras marcadas, com conferência de cada segmento e retenção. A reprodução no painel (linha do tempo, player, exportação) chega na Fase 5; as telas das fases seguintes aparecem no menu com o aviso da fase. Veja `docs/plano-de-execucao.md`.
 
 ---
 
@@ -41,7 +41,7 @@ Navegador ◄──── mídia WebRTC :8189 (UDP/TCP) ──── mediamtx
 
 `aguardando_transmissao → conectando → recebendo → validando → ao_vivo → gravando`, mais `offline`, `erro` e `desabilitada`.
 
-- **"Gravando"** só é alcançado depois que um segmento durável é confirmado no banco (Fase 4).
+- **"Gravando"** só é alcançado depois que um segmento de gravação é conferido (arquivo no disco, SHA-256 e mídia válida) e registrado no banco.
 - **`last_video_at`** só avança quando os bytes recebidos crescem. Uma câmera conectada mas "congelada" cai para `offline` (motivo `video_stalled`).
 
 ---
@@ -76,6 +76,7 @@ Navegador ◄──── mídia WebRTC :8189 (UDP/TCP) ──── mediamtx
    scripts/accept-phase1.sh     # ingestão RTMP, ~12 min
    scripts/accept-phase2.sh     # login, isolamento, permissões, auditoria, ~3 min
    scripts/accept-phase3.sh     # ao vivo das 5 câmeras (HLS, WebRTC, segurança), ~3 min
+   scripts/accept-phase4.sh     # gravação, lacunas, reinícios e retenção, ~15 min
    ```
 6. **Entrar no painel:** `http://<PUBLIC_HOST>` com `ADMIN_EMAIL` e `ADMIN_INITIAL_PASSWORD` do `.env`. No primeiro acesso o sistema exige a troca da senha (mínimo 10 caracteres, letras e números, sem conter o e-mail).
 
@@ -116,6 +117,8 @@ Postgres, Redis, API do MediaMTX, RTSP, HLS e a sinalização WebRTC **não** s�
 - **Usuários** cria o acesso com senha temporária (exibida uma única vez) e define, por usuário, quais câmeras ele vê.
 - **Ao Vivo:** árvore Empresa › Local › Grupo, mosaico 1/4/9/16, tela cheia, foco numa câmera (duplo clique ou clique na árvore), pausa, som, captura de imagem. "Automático" tenta **WebRTC** (menor atraso) e, se não conectar, usa **HLS**. O ícone de monitor na lista de Câmeras abre a câmera ao vivo.
 - **Segurança do ao vivo:** o navegador recebe só um endereço temporário `/live/<token>/…` (2 h), ligado ao usuário, à sessão e à câmera. A chave RTMP e o caminho interno nunca chegam ao navegador. O gateway reconfere o acesso a cada pedido (cache de 5 s); no WebRTC, o worker encerra a cada 10 s as conexões cujo acesso foi retirado (logout, usuário ou cliente desativado, permissão ou câmera retirada). Abrir o ao vivo fica na auditoria (um registro por usuário e câmera a cada 30 min).
+- **Gravação:** grava continuamente só as câmeras com **gravação** marcada no cadastro, em segmentos de 60 s (`cam/<id da câmera>/<início UTC>.mp4` no disco de vídeo). Cada segmento é conferido pelo worker (tamanho, SHA-256 e ffprobe) antes de contar: só então a câmera aparece como **Gravando**. Queda de sinal vira **lacuna** registrada (evento). Os segmentos vencidos pela retenção da câmera (24 h por padrão) são apagados do disco e do índice a cada minuto. Uma varredura da pasta indexa o que os avisos do servidor de mídia não informaram (reinício, API fora do ar) e alerta se aparecer gravação de câmera só ao vivo. Os detalhes da câmera mostram horas disponíveis, espaço usado e lacunas. A chave geral fica em **Configurações** (desliga todas as gravações de uma vez).
+- **Espaço:** 24 h ocupam cerca de **bitrate (Mbps) × 10,8 GB**. Ex.: 1,9 Mbps ≈ 20,5 GB.
 - **Sessão:** token de acesso de 15 min em memória e renovação por cookie httpOnly (30 dias), trocado a cada uso. Login bloqueia 15 min após 5 erros no mesmo e-mail (ou 20 no mesmo IP).
 
 ## Operação
@@ -142,6 +145,9 @@ docker compose exec api node apps/api/dist/cli.js user:reset-password --email vo
 docker compose exec api node apps/api/dist/cli.js user:create --email x@y --name "Nome" --role platform_admin
 docker compose exec api node apps/api/dist/cli.js user:disable --email x@y
 docker compose exec api node apps/api/dist/cli.js user:delete --email x@y
+
+# gravações: horas disponíveis, espaço, último segmento, lacunas e problemas por câmera
+docker compose exec api node apps/api/dist/cli.js recording:status
 ```
 
 Toda exibição e troca de chave fica registrada em `audit_logs`.

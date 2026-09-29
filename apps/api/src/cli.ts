@@ -29,6 +29,7 @@ import {
  *   user:reset-password --email <e-mail>   (senha temporária; troca obrigatória no próximo acesso)
  *   user:disable     --email <e-mail>      (encerra as sessões)
  *   user:delete      --email <e-mail>      (exclusão lógica; some das listas, fica na auditoria)
+ *   recording:status [--tenant <slug>]     (gravações: horas disponíveis, espaço, lacunas, problemas)
  *
  * Os comandos de usuário servem para recuperar o acesso (ex.: único administrador
  * bloqueado) e para o script de aceite; ficam registrados na auditoria (ator "cli").
@@ -44,7 +45,8 @@ const HELP = `uso:
   user:create         --email <e-mail> --name <nome> --role <papel> [--tenant <slug>]
   user:reset-password --email <e-mail>
   user:disable        --email <e-mail>
-  user:delete         --email <e-mail>`;
+  user:delete         --email <e-mail>
+  recording:status    [--tenant <slug>]`;
 
 function need(name: string): string {
   const v = process.env[name];
@@ -149,6 +151,52 @@ async function main() {
       return newKey;
     });
     printKey(tenant, code, key, values.raw ?? false);
+    return;
+  }
+
+  if (cmd === "recording:status") {
+    const rows = await withScope(
+      pool,
+      PLATFORM,
+      async (c) =>
+        (
+          await c.query(
+            `SELECT t.slug AS cliente, c.code AS camera, c.status,
+                    CASE WHEN c.recording_enabled THEN coalesce(rp.retention_hours, 24) || ' h' ELSE 'não' END AS grava,
+                    count(s.*) FILTER (WHERE s.state = 'verified') AS segmentos,
+                    round(extract(epoch FROM (max(s.ended_at) FILTER (WHERE s.state = 'verified')
+                          - min(s.started_at) FILTER (WHERE s.state = 'verified'))) / 3600, 2) AS horas,
+                    pg_size_pretty(coalesce(sum(s.size_bytes) FILTER (WHERE s.state = 'verified'), 0)) AS espaco,
+                    to_char(min(s.started_at) FILTER (WHERE s.state = 'verified') AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI') AS mais_antigo,
+                    to_char(c.last_durable_segment_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM HH24:MI:SS') AS ultimo_segmento,
+                    count(s.*) FILTER (WHERE s.state IN ('corrupt', 'missing')) AS problemas,
+                    (SELECT count(*) FROM camera_events e WHERE e.camera_id = c.id AND e.type = 'recording_gap'
+                        AND e.occurred_at > now() - interval '24 hours') AS lacunas_24h
+               FROM cameras c
+               JOIN tenants t ON t.id = c.tenant_id
+               LEFT JOIN retention_policies rp ON rp.id = c.retention_policy_id
+               LEFT JOIN recording_segments s ON s.camera_id = c.id AND s.state <> 'deleted'
+              WHERE c.deleted_at IS NULL AND ($1::text IS NULL OR t.slug = $1)
+              GROUP BY t.slug, c.id, c.code, c.status, c.recording_enabled, rp.retention_hours, c.last_durable_segment_at
+             HAVING c.recording_enabled OR count(s.*) > 0
+              ORDER BY t.slug, c.code`,
+            [values.tenant ?? null],
+          )
+        ).rows,
+    );
+    const global = await withScope(
+      pool,
+      PLATFORM,
+      async (c) =>
+        (
+          await c.query(
+            "SELECT value FROM system_settings WHERE key = 'recording.globally_enabled'",
+          )
+        ).rows[0]?.value,
+    );
+    console.log(`Gravação geral: ${global === true ? "ligada" : "DESLIGADA"}`);
+    if (rows.length) console.table(rows);
+    else console.log("Nenhuma câmera com gravação.");
     return;
   }
 

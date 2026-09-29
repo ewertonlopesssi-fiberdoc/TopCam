@@ -1,6 +1,7 @@
 import {
   insertCameraEvent,
   nextCameraCode,
+  reapplyRetention,
   rotateStreamKey,
   transitionCamera,
   type PoolClient,
@@ -284,6 +285,8 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
           b.enabled ?? null,
         ],
       );
+      // Retenção alterada: a validade das gravações já feitas acompanha a nova regra.
+      if (retention && retention !== cur.retentionPolicyId) await reapplyRetention(c, id);
       if (b.enabled === false && cur.enabled)
         await transitionCamera(c, id, "disabled", "disabled_by_user");
       if (b.enabled === true && !cur.enabled)

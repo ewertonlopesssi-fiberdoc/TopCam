@@ -123,10 +123,17 @@ log "L2–L7: endereços, HLS, WHEP e segurança"
 collect < <(stage setup "ACC_TEMP=$ACC_TEMP" 2>&1)
 
 # ------------------------------------------------------------------ L6: nada gravado
-files=$(dc exec -T mediamtx sh -c 'find /recordings -type f 2>/dev/null | wc -l' | tr -d '\r ')
-segs=$(sql "SELECT count(*) FROM recording_segments")
+# Câmeras só ao vivo (gravação desmarcada): nenhum arquivo e nenhum registro. As
+# câmeras com gravação marcada (a partir da Fase 4) não entram nesta conta.
+live_only=$(sql "SELECT string_agg(id::text, ' ') FROM cameras WHERE NOT recording_enabled AND deleted_at IS NULL")
+files=0
+for id in $live_only; do
+  n=$(dc exec -T mediamtx sh -c "find /recordings/cam/$id -type f 2>/dev/null | wc -l" | tr -d '\r ')
+  files=$((files + ${n:-0}))
+done
+segs=$(sql "SELECT count(*) FROM recording_segments s JOIN cameras c ON c.id = s.camera_id WHERE NOT c.recording_enabled AND s.state <> 'deleted'")
 record L6 "$([ "$files" = 0 ] && [ "$segs" = 0 ] && echo PASS || echo FAIL)" \
-  "Ao vivo não grava: nenhum arquivo nem registro de segmento" "arquivos em /recordings: $files; recording_segments: $segs"
+  "Câmeras só ao vivo não gravam: nenhum arquivo nem registro de segmento" "câmeras só ao vivo: $(wc -w <<<"$live_only"); arquivos: $files; registros: $segs"
 
 # ------------------------------------------------------------------ L8: portas
 closed=(); open_int=()

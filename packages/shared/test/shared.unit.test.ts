@@ -10,6 +10,8 @@ import {
   mediaPathForKey,
   nextCameraStatus,
   parseEncryptionKey,
+  parseMtxDuration,
+  parseSegmentPath,
   recordDirForCamera,
   cameraPathName,
   safeEqual,
@@ -133,5 +135,43 @@ describe("máquina de estados da câmera", () => {
     expect(nextCameraStatus("offline", "stream_online")).toBe("recebendo");
     expect(nextCameraStatus("erro", "stream_online")).toBe("recebendo");
     expect(nextCameraStatus("ao_vivo", "stream_online")).toBeNull();
+  });
+});
+
+describe("segmentos de gravação", () => {
+  const id = "4405e718-4a2c-4c26-a580-d8755d8e5271";
+
+  it("interpreta o caminho do MediaMTX (absoluto ou relativo) e o início em UTC", () => {
+    const abs = parseSegmentPath(`/recordings/cam/${id}/2026-09-29_00-45-46-515667.mp4`);
+    expect(abs).toEqual({
+      cameraId: id,
+      relPath: `cam/${id}/2026-09-29_00-45-46-515667.mp4`,
+      startedAt: new Date("2026-09-29T00:45:46.515Z"),
+    });
+    expect(parseSegmentPath(`cam/${id}/2026-09-29_00-45-46-515667.mp4`)?.cameraId).toBe(id);
+    expect(
+      parseSegmentPath(`/dados/cam/${id}/2026-09-29_00-45-46-515667.mp4`, "/dados/")?.cameraId,
+    ).toBe(id);
+  });
+
+  it("recusa caminhos fora do padrão", () => {
+    for (const bad of [
+      `/recordings/live/${"a".repeat(40)}/2026-09-29_00-45-46-515667.mp4`,
+      `/recordings/cam/${id}/../../etc/passwd`,
+      `/recordings/cam/${id}/2026-09-29_00-45-46.mp4`,
+      `/recordings/cam/nao-e-uuid/2026-09-29_00-45-46-515667.mp4`,
+      `/outra/cam/${id}/2026-09-29_00-45-46-515667.mp4`,
+      `/recordings/cam/${id}/2026-13-45_00-45-46-515667.mp4x`,
+    ])
+      expect(parseSegmentPath(bad), bad).toBeNull();
+  });
+
+  it("converte a duração informada pelo MediaMTX", () => {
+    expect(parseMtxDuration("60.033s")).toBe(60033);
+    expect(parseMtxDuration("1m0.5s")).toBe(60500);
+    expect(parseMtxDuration("59.9")).toBe(59900);
+    expect(parseMtxDuration("750ms")).toBe(750);
+    expect(parseMtxDuration("")).toBeNull();
+    expect(parseMtxDuration("abc")).toBeNull();
   });
 });

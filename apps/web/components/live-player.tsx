@@ -41,6 +41,9 @@ export interface LiveCameraInfo {
   audioCodec: string | null;
 }
 
+/** Codecs de áudio que o WebRTC entrega ao navegador (nomes do ffprobe). */
+const WEBRTC_AUDIO = new Set(["opus", "pcm_alaw", "pcm_mulaw", "adpcm_g722", "g722"]);
+
 /** Estados em que há vídeo chegando ao servidor (vale a pena tentar tocar). */
 const RECEIVING = new Set(["recebendo", "validando", "ao_vivo", "gravando"]);
 
@@ -149,6 +152,11 @@ export function LivePlayer({
 
   const receiving = RECEIVING.has(camera.status);
   const hasAudio = Boolean(camera.audioCodec);
+  // O WebRTC do navegador só leva áudio Opus/G.711/G.722. Com outro codec (ex.: AAC),
+  // ativar o som troca este vídeo para HLS, que toca o áudio da câmera.
+  const webrtcAudio = WEBRTC_AUDIO.has((camera.audioCodec ?? "").toLowerCase());
+  const [audioHls, setAudioHls] = useState(false);
+  const effMode: LiveMode = audioHls ? "hls" : mode;
 
   // ---- início e reconexão
   useEffect(() => {
@@ -207,7 +215,7 @@ export function LivePlayer({
     };
 
     (async () => {
-      if (mode !== "hls" && typeof RTCPeerConnection !== "undefined") {
+      if (effMode !== "hls" && typeof RTCPeerConnection !== "undefined") {
         try {
           const pc = await startWhep(session.whep!, v, ctrl.signal);
           if (ctrl.signal.aborted) return;
@@ -222,7 +230,7 @@ export function LivePlayer({
         } catch (err) {
           if (ctrl.signal.aborted) return;
           v.srcObject = null;
-          if (mode === "webrtc") return fail((err as Error).message);
+          if (effMode === "webrtc") return fail((err as Error).message);
           console.debug(`[ao vivo] ${camera.code}: WebRTC indisponível, usando HLS`, err);
         }
       }
@@ -238,7 +246,12 @@ export function LivePlayer({
       setTech(null);
     };
     // "attempt" força uma nova tentativa com o mesmo endereço.
-  }, [session?.hls, session?.whep, session?.ok, mode, receiving, attempt]);
+  }, [session?.hls, session?.whep, session?.ok, effMode, receiving, attempt]);
+
+  // O React nem sempre reflete a propriedade "muted" do <video> ao mudar.
+  useEffect(() => {
+    if (video.current) video.current.muted = muted;
+  }, [muted, tech]);
 
   // ---- vídeo tocando
   useEffect(() => {
@@ -389,7 +402,10 @@ export function LivePlayer({
         </CtrlButton>
         <CtrlButton
           label={muted ? "Ativar som" : "Silenciar"}
-          onClick={() => setMuted((m) => !m)}
+          onClick={() => {
+            if (muted && tech === "webrtc" && !webrtcAudio) setAudioHls(true);
+            setMuted((m) => !m);
+          }}
           disabled={!hasAudio || state !== "playing"}
         >
           {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}

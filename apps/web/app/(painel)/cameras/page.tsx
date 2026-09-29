@@ -4,6 +4,7 @@ import {
   Camera as CameraIcon,
   Download,
   Eye,
+  Film,
   EyeOff,
   KeyRound,
   Loader2,
@@ -36,7 +37,7 @@ import {
 } from "@/components/ui";
 import { api, qs, type Page } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { CAMERA_STATUS, fmtDateTime, fmtRelative } from "@/lib/format";
+import { CAMERA_STATUS, fmtBytes, fmtDateTime, fmtRelative } from "@/lib/format";
 
 interface Camera {
   id: string;
@@ -343,6 +344,94 @@ function CameraForm({
   );
 }
 
+// ------------------------------------------------------------------ gravação (resumo)
+interface RecordingSummary {
+  status: string;
+  recordingEnabled: boolean;
+  globalEnabled: boolean;
+  retentionHours: number | null;
+  lastDurableSegmentAt: string | null;
+  segments: number;
+  bytes: number;
+  oldest: string | null;
+  newest: string | null;
+  corrupt: number;
+  missing: number;
+  gaps24h: number;
+}
+
+function RecordingPanel({ cameraId }: { cameraId: string }) {
+  const [r, setR] = useState<RecordingSummary | null>(null);
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      api
+        .get<RecordingSummary>(`/cameras/${cameraId}/recordings/summary`)
+        .then((x) => alive && setR(x))
+        .catch(() => alive && setHidden(true));
+    void load();
+    const t = setInterval(load, 15_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [cameraId]);
+  if (hidden || !r || (!r.recordingEnabled && r.segments === 0)) return null;
+  const hours =
+    r.oldest && r.newest
+      ? (new Date(r.newest).getTime() - new Date(r.oldest).getTime()) / 3_600_000
+      : 0;
+  const state = !r.globalEnabled
+    ? { text: "Gravação geral desligada (Configurações)", tone: "amber" as const }
+    : r.status === "gravando"
+      ? { text: "Gravando", tone: "green" as const }
+      : r.recordingEnabled
+        ? {
+            text: ["ao_vivo", "validando", "recebendo"].includes(r.status)
+              ? "Aguardando o primeiro segmento"
+              : "Parada: câmera sem sinal",
+            tone: "amber" as const,
+          }
+        : { text: "Gravação desmarcada no cadastro", tone: "slate" as const };
+  const items: [string, React.ReactNode][] = [
+    ["Situação", <Badge tone={state.tone}>{state.text}</Badge>],
+    ["Último segmento", r.lastDurableSegmentAt ? fmtRelative(r.lastDurableSegmentAt) : "—"],
+    [
+      "Disponível",
+      r.segments
+        ? `${hours.toFixed(1).replace(".", ",")} h (${r.segments} segmentos)${
+            r.retentionHours ? ` · retenção ${r.retentionHours} h` : ""
+          }`
+        : "—",
+    ],
+    ["Espaço usado", fmtBytes(r.bytes)],
+    ["Lacunas (24 h)", r.gaps24h ? `${r.gaps24h}` : "nenhuma"],
+  ];
+  if (r.corrupt || r.missing)
+    items.push([
+      "Problemas",
+      <span className="text-red-600">
+        {r.corrupt} inválido(s), {r.missing} ausente(s)
+      </span>,
+    ]);
+  return (
+    <section className="mt-6 rounded-xl border border-line p-4" data-testid="recording-panel">
+      <h3 className="mb-3 flex items-center gap-2 font-semibold">
+        <Film size={16} /> Gravação
+      </h3>
+      <dl className="space-y-2 text-sm">
+        {items.map(([k, v]) => (
+          <div key={k} className="grid grid-cols-5 gap-2">
+            <dt className="col-span-2 text-muted">{k}</dt>
+            <dd className="col-span-3">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 // ------------------------------------------------------------------ detalhes
 function CameraDrawer({
   camera,
@@ -397,6 +486,7 @@ function CameraDrawer({
           </div>
         ))}
       </dl>
+      <RecordingPanel cameraId={camera.id} />
       {canKeys && (
         <section className="mt-6 rounded-xl border border-line p-4">
           <h3 className="mb-1 flex items-center gap-2 font-semibold">

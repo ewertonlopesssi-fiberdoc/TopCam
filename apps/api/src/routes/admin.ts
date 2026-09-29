@@ -3,7 +3,7 @@ import { ROLE_LABELS, assignableRoles, isRoleKey } from "@topcam/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { audit } from "../lib/audit.js";
-import { db, effectiveTenant, paged } from "../lib/ctx.js";
+import { db, effectiveTenant, paged, scheduleReconcile, wakeWorker } from "../lib/ctx.js";
 import { conflict, notFound, pagination, parseBody } from "../lib/http.js";
 
 /** Metadados para os formulários, configurações da plataforma e trilha de auditoria. */
@@ -17,6 +17,8 @@ type EditableKey = keyof typeof EDITABLE_SETTINGS;
 const settingsBody = z.object({
   platformName: EDITABLE_SETTINGS["platform.name"].optional(),
   supportEmail: EDITABLE_SETTINGS["platform.support_email"].optional(),
+  /** Chave geral da gravação (desliga todas as câmeras de uma vez, sem mexer nos cadastros). */
+  recordingGloballyEnabled: z.boolean().optional(),
 });
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
@@ -78,9 +80,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: app.requirePermission("settings.write") },
     async (req) => {
       const b = parseBody(settingsBody, req.body);
-      const changes: Partial<Record<EditableKey, string>> = {};
+      const changes: Partial<Record<EditableKey | "recording.globally_enabled", string | boolean>> =
+        {};
       if (b.platformName !== undefined) changes["platform.name"] = b.platformName;
       if (b.supportEmail !== undefined) changes["platform.support_email"] = b.supportEmail;
+      if (b.recordingGloballyEnabled !== undefined)
+        changes["recording.globally_enabled"] = b.recordingGloballyEnabled;
       await withScope(pool, PLATFORM, async (c) => {
         for (const [key, value] of Object.entries(changes)) {
           await c.query(
@@ -94,7 +99,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           entityType: "settings",
           data: { changes },
         });
+        if (b.recordingGloballyEnabled !== undefined)
+          await scheduleReconcile(c, "recording_global_changed");
       });
+      if (b.recordingGloballyEnabled !== undefined) await wakeWorker(app);
       return { ok: true };
     },
   );
