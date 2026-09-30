@@ -109,6 +109,12 @@ Estes pontos são validados no procedimento abaixo.
 - **Reteste com terminal simulado:** install completo, status e confirmação `OK`.
 - **Timer:** se ele não ligar, o install agora avisa em vez de ficar calado.
 
+- **Segunda correção:** na VM a confirmação `OK` não era recebida pela janela 1, embora a nova sessão entrasse. Agora:
+  - a confirmação pode ser feita **pela própria sessão nova**, com `topcam-host confirmar`;
+  - na janela 1, a resposta é lida direto do terminal e aceita `ok` em maiúsculas ou minúsculas, com ou sem espaços, além de `sim`;
+  - o que foi recebido aparece na tela;
+  - reverter também apaga as regras salvas.
+
 ### Procedimento na VM (em ordem)
 
 1. **Atualizar** com o bundle, como sempre (`scripts/update.sh --bundle …`). A migração 0008 roda sozinha, e o painel continua em HTTP.
@@ -122,7 +128,7 @@ Estes pontos são validados no procedimento abaixo.
    ```
    scripts/host/topcam-host install --ssh 172.31.0.0/16 --ssh 100.65.0.0/21 --ssh 100.66.0.0/21 --ssh 45.237.164.0/22
    ```
-   Abra **outra** sessão SSH. Se entrar, digite `OK` na primeira em até 120 s.
+   Abra **outra** sessão SSH. Se entrar, rode nela `topcam-host confirmar`, em até 120 s.
 5. **RTMPS** (opcional, cerca de 1 min depois do passo 3):
    ```
    scripts/https.sh --rtmps on

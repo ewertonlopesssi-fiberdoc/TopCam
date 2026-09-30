@@ -13,6 +13,7 @@
 # Uso (como root):
 #   scripts/host/topcam-host install --ssh 172.31.0.0/16 --ssh 100.65.0.0/21 ...
 #   topcam-host sync             # o que o timer roda a cada minuto
+#   topcam-host confirmar        # na NOVA sessão SSH, durante a instalação
 #   topcam-host status
 #   topcam-host reset            # EMERGÊNCIA: volta às redes da instalação
 #   topcam-host disable          # remove o firewall do TopCam e para o serviço (tudo liberado)
@@ -296,15 +297,28 @@ EOF
   # Trava 2: aplica e desfaz sozinho em 120 s se você não confirmar.
   firewall_sync 1 || die "firewall não aplicado"
   echo
-  echo ">>> Firewall aplicado. ABRA UMA NOVA SESSÃO SSH para testar."
-  echo ">>> Se conseguir entrar, digite OK aqui em até 120 segundos."
-  echo ">>> Sem confirmação, o firewall é desfeito sozinho."
-  local ans=""
-  read -r -t 120 ans || true
-  if [ "$ans" != "OK" ] && [ "$ans" != "ok" ]; then
+  local flag="$STATE/confirmado" t0 ans="" got="" ok=0
+  rm -f "$flag"
+  echo ">>> Firewall aplicado. Agora ABRA UMA NOVA SESSÃO SSH e, nela, rode:"
+  echo ">>>     topcam-host confirmar"
+  echo ">>> (ou digite OK aqui e Enter). Prazo: 120 segundos; sem confirmação, tudo é desfeito."
+  t0=$(date +%s)
+  while [ $(( $(date +%s) - t0 )) -lt 120 ]; do
+    [ -f "$flag" ] && { ok=1; log "confirmado pela nova sessão SSH"; break; }
+    ans=""
+    if [ -r /dev/tty ] && read -r -t 1 ans </dev/tty 2>/dev/null; then
+      ans=$(printf '%s' "$ans" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+      if [ "$ans" = OK ] || [ "$ans" = SIM ] || [ "$ans" = S ]; then ok=1; log "confirmado aqui"; break; fi
+      [ -n "$ans" ] && got="$ans" && echo ">>> recebido \"$ans\"; digite OK (ou rode topcam-host confirmar na nova sessão)"
+    else
+      sleep 1
+    fi
+  done
+  rm -f "$flag"
+  if [ "$ok" != 1 ]; then
     nft delete table $TABLE 2>/dev/null
-    rm -f "$STATE/firewall.hash"
-    die "sem confirmação: firewall desfeito. Nada ficou bloqueado."
+    rm -f "$STATE/firewall.hash" "$STATE/firewall.nft"
+    die "sem confirmação${got:+ (recebido: $got)}: firewall desfeito. Nada ficou bloqueado."
   fi
   if ! systemctl enable --now topcam-host.timer >/dev/null 2>&1; then
     log "ATENÇÃO: firewall aplicado, mas o timer não ligou. Veja: systemctl status topcam-host.timer"
@@ -354,7 +368,10 @@ case "${1:-}" in
     systemctl enable --now topcam-host.timer >/dev/null
     log "serviço religado" ;;
   status) cmd_status ;;
+  confirmar|confirm)
+    mkdir -p "$STATE" && touch "$STATE/confirmado"
+    echo "Confirmado: esta sessão entrou com o firewall aplicado. A instalação conclui em até 1 segundo." ;;
   render) shift; for c in "$@"; do valid_cidr "$c" || die "rede inválida: $c"; done; render "$@" ;;
   valid) valid_cidr "${2:-}" && echo ok || { echo inválida; exit 1; } ;;
-  *) sed -n '2,25p' "$0"; exit 2 ;;
+  *) sed -n '2,26p' "$0"; exit 2 ;;
 esac
