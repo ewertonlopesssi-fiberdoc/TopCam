@@ -28,6 +28,13 @@ import {
   useToast,
   type Column,
 } from "@/components/ui";
+import {
+  PasswordFields,
+  emptyPassword,
+  passwordPayload,
+  passwordStateError,
+  type PasswordState,
+} from "@/components/password-fields";
 import { api, qs, type Page } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { USER_STATUS, fmtRelative } from "@/lib/format";
@@ -45,6 +52,20 @@ interface User {
   lastLoginAt: string | null;
   lastSeenAt: string | null;
   cameraPermissionCount: number;
+}
+
+/** Resultado de uma senha definida (mostrado ao administrador). */
+interface Access {
+  email: string;
+  /** Só quando o sistema gerou a senha (a digitada o administrador já conhece). */
+  password?: string;
+  mustChange: boolean;
+  mail: { sent: boolean; error: string | null } | null;
+}
+interface PasswordResult {
+  temporaryPassword?: string;
+  mustChangePassword: boolean;
+  mail: Access["mail"];
 }
 
 interface Role {
@@ -77,6 +98,7 @@ function UserForm({
   user,
   roles,
   tenants,
+  mailEnabled,
   onClose,
   onSaved,
 }: {
@@ -84,14 +106,16 @@ function UserForm({
   user: User | null;
   roles: Role[];
   tenants: TenantOpt[];
+  mailEnabled: boolean;
   onClose: () => void;
-  onSaved: (tempPassword?: { email: string; password: string }) => void;
+  onSaved: (access?: Access) => void;
 }) {
   const auth = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("viewer");
   const [tenantId, setTenantId] = useState("");
+  const [pw, setPw] = useState<PasswordState>(emptyPassword());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const assignable = roles.filter((r) => r.assignable);
@@ -104,23 +128,45 @@ function UserForm({
     setEmail(user?.email ?? "");
     setRole(user?.role ?? "viewer");
     setTenantId(user?.tenantId ?? auth.user?.tenant?.id ?? "");
+    setPw(emptyPassword());
   }, [open, user, auth.user]);
 
   async function save() {
     setBusy(true);
     setError(null);
     try {
+      const local = passwordStateError(pw);
+      if (local) throw new Error(local);
       if (user) {
-        await api.patch(`/users/${user.id}`, { name, ...(role !== user.role ? { role } : {}) });
-        onSaved();
+        const withPassword = Boolean(pw.password);
+        const r = await api.patch<{ mail: Access["mail"] }>(`/users/${user.id}`, {
+          name,
+          ...(role !== user.role ? { role } : {}),
+          ...(withPassword ? passwordPayload(pw) : {}),
+        });
+        onSaved(
+          withPassword
+            ? {
+                email: user.email,
+                mustChange: passwordPayload(pw).mustChangePassword,
+                mail: r.mail,
+              }
+            : undefined,
+        );
       } else {
-        const r = await api.post<{ temporaryPassword: string }>("/users", {
+        const r = await api.post<PasswordResult>("/users", {
           name,
           email,
           role,
           tenantId: selected?.scope === "tenant" ? tenantId || null : null,
+          ...passwordPayload(pw),
         });
-        onSaved({ email, password: r.temporaryPassword });
+        onSaved({
+          email,
+          password: r.temporaryPassword,
+          mustChange: r.mustChangePassword,
+          mail: r.mail,
+        });
       }
       onClose();
     } catch (err) {
@@ -213,10 +259,17 @@ function UserForm({
             </select>
           </Field>
         )}
-        {!user && (
+        {!self && (
+          <PasswordFields
+            state={pw}
+            onChange={setPw}
+            mailEnabled={mailEnabled}
+            optionalLabel={user ? "Em branco: mantém a atual" : "Em branco: o sistema gera"}
+          />
+        )}
+        {self && user && (
           <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            Uma senha temporária será gerada e mostrada uma única vez. No primeiro acesso, o usuário
-            precisa trocá-la.
+            Para trocar a sua senha, use Configurações → Minha conta.
           </p>
         )}
       </div>
@@ -391,6 +444,84 @@ function PermissionsModal({
 }
 
 // ------------------------------------------------------------------ página
+// ------------------------------------------------------------------ alterar senha / enviar acesso
+function PasswordModal({
+  target,
+  mailEnabled,
+  onClose,
+  onSaved,
+}: {
+  target: { user: User; email: boolean } | null;
+  mailEnabled: boolean;
+  onClose: () => void;
+  onSaved: (a: Access) => void;
+}) {
+  const [pw, setPw] = useState<PasswordState>(emptyPassword());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    if (!target) return;
+    setError(null);
+    setPw(emptyPassword(target.email));
+  }, [target]);
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const local = passwordStateError(pw);
+      if (local) throw new Error(local);
+      const r = await api.post<PasswordResult>(
+        `/users/${target!.user.id}/reset-password`,
+        passwordPayload(pw),
+      );
+      onSaved({
+        email: target!.user.email,
+        password: r.temporaryPassword,
+        mustChange: r.mustChangePassword,
+        mail: r.mail,
+      });
+      onClose();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={!!target}
+      title="Alterar senha / enviar acesso"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn-secondary" onClick={onClose}>
+            Cancelar
+          </button>
+          <button className="btn-primary" onClick={save} disabled={busy}>
+            {busy && <Loader2 size={16} className="animate-spin" />}{" "}
+            {pw.sendEmail && mailEnabled ? "Salvar e enviar" : "Salvar senha"}
+          </button>
+        </>
+      }
+    >
+      <ErrorBox error={error} />
+      <p className="mb-3 text-sm text-slate-700">
+        Nova senha para <b>{target?.user.name}</b> ({target?.user.email}). As sessões abertas dele
+        serão encerradas.
+      </p>
+      <PasswordFields
+        state={pw}
+        onChange={setPw}
+        mailEnabled={mailEnabled}
+        optionalLabel="Em branco: o sistema gera"
+      />
+    </Modal>
+  );
+}
+
 export default function UsuariosPage() {
   const auth = useAuth();
   const toast = useToast();
@@ -407,8 +538,10 @@ export default function UsuariosPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [perms, setPerms] = useState<User | null>(null);
-  const [temp, setTemp] = useState<{ email: string; password: string } | null>(null);
-  const [resetting, setResetting] = useState<User | null>(null);
+  const [temp, setTemp] = useState<Access | null>(null);
+  const [resetting, setResetting] = useState<{ user: User; email: boolean } | null>(null);
+  const [mailEnabled, setMailEnabled] = useState(false);
+  const canWriteUsers = auth.can("users.write");
   const [toggling, setToggling] = useState<User | null>(null);
   const [deleting, setDeleting] = useState<User | null>(null);
 
@@ -441,7 +574,19 @@ export default function UsuariosPage() {
         .get<Page<TenantOpt>>("/tenants?pageSize=100")
         .then((r) => setTenants(r.items))
         .catch(() => undefined);
-  }, [auth.isPlatform]);
+    if (canWriteUsers)
+      api
+        .get<{ enabled: boolean }>("/users/mail-status")
+        .then((r) => setMailEnabled(r.enabled))
+        .catch(() => undefined);
+  }, [auth.isPlatform, canWriteUsers]);
+
+  /** Senha gerada ou falha no e-mail: mostra o quadro. Senha digitada e e-mail enviado: só um aviso. */
+  function showAccess(a: Access | undefined, fallback: string) {
+    if (!a) return toast(fallback);
+    if (a.password || (a.mail && !a.mail.sent)) return setTemp(a);
+    toast(a.mail?.sent ? `${fallback}. Acesso enviado para ${a.email}` : fallback);
+  }
 
   const columns: Column<User>[] = [
     {
@@ -616,14 +761,16 @@ export default function UsuariosPage() {
                           <Camera size={16} />
                         </button>
                       )}
-                    <button
-                      className="icon-btn"
-                      title="Redefinir senha"
-                      aria-label={`Redefinir senha de ${u.name}`}
-                      onClick={() => setResetting(u)}
-                    >
-                      <KeyRound size={16} />
-                    </button>
+                    {u.id !== auth.user?.id && (
+                      <button
+                        className="icon-btn"
+                        title="Alterar senha / enviar acesso"
+                        aria-label={`Alterar senha de ${u.name}`}
+                        onClick={() => setResetting({ user: u, email: mailEnabled })}
+                      >
+                        <KeyRound size={16} />
+                      </button>
+                    )}
                     <button
                       className="icon-btn"
                       title={u.status === "active" ? "Desativar" : "Reativar"}
@@ -660,18 +807,18 @@ export default function UsuariosPage() {
         user={editing}
         roles={roles}
         tenants={tenants}
+        mailEnabled={mailEnabled}
         onClose={() => setFormOpen(false)}
-        onSaved={(t) => {
+        onSaved={(a) => {
           void load();
-          if (t) setTemp(t);
-          else toast("Usuário atualizado");
+          showAccess(a, "Usuário salvo");
         }}
       />
       <PermissionsModal user={perms} onClose={() => setPerms(null)} onSaved={load} />
 
       <Modal
         open={!!temp}
-        title="Senha temporária"
+        title={temp?.password ? "Senha gerada" : "Acesso"}
         onClose={() => setTemp(null)}
         footer={
           <button className="btn-primary" onClick={() => setTemp(null)}>
@@ -679,42 +826,47 @@ export default function UsuariosPage() {
           </button>
         }
       >
-        <p className="text-sm text-slate-700">
-          Envie ao usuário <b>{temp?.email}</b> por um canal seguro. Ela{" "}
-          <b>não será mostrada de novo</b>. No primeiro acesso, a troca é obrigatória.
-        </p>
-        <div className="mt-3 flex items-center gap-2">
-          <code
-            className="flex-1 rounded-lg bg-slate-100 px-3 py-2 font-mono text-base tracking-wider"
-            data-testid="temp-password"
+        {temp?.mail && (
+          <p
+            role={temp.mail.sent ? "status" : "alert"}
+            className={`mb-3 rounded-lg px-3 py-2 text-sm ${temp.mail.sent ? "bg-green-50 text-green-800" : "bg-red-50 text-red-700"}`}
           >
-            {temp?.password}
-          </code>
-          <CopyButton value={temp?.password ?? ""} />
-        </div>
+            {temp.mail.sent
+              ? `Usuário e senha enviados por e-mail para ${temp.email}.`
+              : `O e-mail não foi enviado: ${temp.mail.error}`}
+          </p>
+        )}
+        {temp?.password && (
+          <>
+            <p className="text-sm text-slate-700">
+              Senha de <b>{temp.email}</b>. Ela <b>não será mostrada de novo</b>
+              {temp.mail?.sent ? "." : ": envie ao usuário por um canal seguro."}
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <code
+                className="flex-1 rounded-lg bg-slate-100 px-3 py-2 font-mono text-base tracking-wider"
+                data-testid="temp-password"
+              >
+                {temp.password}
+              </code>
+              <CopyButton value={temp.password} />
+            </div>
+          </>
+        )}
+        <p className="mt-3 text-xs text-muted">
+          {temp?.mustChange
+            ? "No primeiro acesso, o usuário precisará trocar a senha."
+            : "O usuário não precisará trocar a senha no primeiro acesso."}
+        </p>
       </Modal>
 
-      <Confirm
-        open={!!resetting}
-        title="Redefinir senha"
-        confirmLabel="Redefinir"
-        message={
-          <>
-            Gerar uma nova senha temporária para <b>{resetting?.name}</b>? As sessões abertas dele
-            serão encerradas.
-          </>
-        }
+      <PasswordModal
+        target={resetting}
+        mailEnabled={mailEnabled}
         onClose={() => setResetting(null)}
-        onConfirm={async () => {
-          try {
-            const r = await api.post<{ temporaryPassword: string }>(
-              `/users/${resetting!.id}/reset-password`,
-            );
-            setTemp({ email: resetting!.email, password: r.temporaryPassword });
-            await load();
-          } catch (err) {
-            toast((err as Error).message, "error");
-          }
+        onSaved={(a) => {
+          void load();
+          showAccess(a, "Senha alterada");
         }}
       />
       <Confirm

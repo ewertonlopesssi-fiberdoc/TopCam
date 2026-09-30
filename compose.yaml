@@ -36,6 +36,8 @@ x-app: &app
     RECORDINGS_PATH: /recordings
     JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET (scripts/generate-env.sh --add-missing)}
     COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    # Endereço do painel nos e-mails (alertas e dados de acesso).
+    PANEL_URL: ${PANEL_URL:-http://${PUBLIC_HOST:-localhost}}
 
 services:
   postgres:
@@ -117,8 +119,6 @@ services:
       <<: *app-env
       POLL_INTERVAL_S: ${POLL_INTERVAL_S:-5}
       OFFLINE_AFTER_S: ${OFFLINE_AFTER_S:-10}
-      # Link do painel nos e-mails de alerta.
-      PANEL_URL: ${PANEL_URL:-http://${PUBLIC_HOST:-localhost}}
     volumes:
       - ${RECORDINGS_DIR:-./.data/recordings}:/recordings
     depends_on:

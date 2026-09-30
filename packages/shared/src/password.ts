@@ -40,23 +40,35 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-/** Política mínima de senha. Retorna a mensagem de erro ou null. */
-export function validatePassword(password: string, email?: string): string | null {
-  if (password.length < 10) return "A senha deve ter pelo menos 10 caracteres.";
+/** Regra de senha exibida nas telas. */
+export const PASSWORD_RULE =
+  "Mínimo de 8 caracteres, com 1 letra maiúscula, 1 minúscula e 1 número.";
+
+/**
+ * Política de senha: mínimo 8 caracteres, com ao menos 1 maiúscula, 1 minúscula e 1 número.
+ * Retorna a mensagem de erro ou null. O segundo parâmetro (e-mail) é aceito por
+ * compatibilidade e não é mais usado.
+ */
+export function validatePassword(password: string, _email?: string): string | null {
+  if (password.length < 8) return "A senha deve ter pelo menos 8 caracteres.";
   if (password.length > 200) return "A senha deve ter no máximo 200 caracteres.";
-  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password))
-    return "A senha deve ter letras e números.";
-  if (email && password.toLowerCase().includes(email.split("@")[0]!.toLowerCase()))
-    return "A senha não pode conter o seu e-mail.";
+  if (!/[A-Z]/.test(password)) return "A senha deve ter ao menos 1 letra maiúscula.";
+  if (!/[a-z]/.test(password)) return "A senha deve ter ao menos 1 letra minúscula.";
+  if (!/[0-9]/.test(password)) return "A senha deve ter ao menos 1 número.";
   return null;
 }
 
 /** Senha temporária legível (sem caracteres ambíguos), usada em criação e redefinição. */
 export function generateTempPassword(length = 14): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-  const bytes = randomBytes(length);
-  let out = "";
-  for (let i = 0; i < length; i++) out += alphabet[bytes[i]! % alphabet.length];
-  // Garante ao menos um dígito (política de senha).
-  return /[0-9]/.test(out) ? out : out.slice(0, -1) + "7";
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnpqrstuvwxyz";
+  const digits = "23456789";
+  const alphabet = upper + lower + digits;
+  for (;;) {
+    const bytes = randomBytes(length);
+    let out = "";
+    for (let i = 0; i < length; i++) out += alphabet[bytes[i]! % alphabet.length];
+    // Sempre atende à política (maiúscula, minúscula e número).
+    if (validatePassword(out) === null) return out;
+  }
 }

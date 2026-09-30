@@ -130,6 +130,8 @@ export const AUDIT_LABELS: Record<string, string> = {
   "user.disabled": "Usuário desativado",
   "user.deleted": "Usuário excluído",
   "user.password_reset": "Senha redefinida",
+  "user.password_set": "Senha alterada pelo administrador",
+  "user.access_emailed": "Acesso enviado por e-mail",
   "user.camera_permissions_updated": "Permissões de câmeras alteradas",
   "location.created": "Local criado",
   "location.updated": "Local alterado",

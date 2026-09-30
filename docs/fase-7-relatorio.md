@@ -73,6 +73,22 @@ O aceite manda os e-mails para o **Mailpit** (servidor de e-mail de teste, perfi
 
 Ao ligar, os alertas que já estiverem abertos saem num único e-mail de resumo. As câmeras de teste que ficaram "offline" em aceites anteriores (Empresa Alfa, Condomínio Sol) também geram alerta "sem sinal". Para não receber esses avisos, desative as câmeras de teste que não estiverem em uso (Câmeras → desativar).
 
+## Ajuste pedido depois do aceite: senha no cadastro e envio do acesso por e-mail (30/09)
+
+Aprovado por você: o e-mail leva o usuário (o próprio e-mail) e a senha, e a regra fica em mínimo 8 caracteres, com 1 maiúscula, 1 minúscula e 1 número.
+
+| Item | Como ficou |
+|---|---|
+| Senha no cadastro | Campos Senha e Confirmar (com "mostrar"). Em branco, o sistema gera uma temporária, como antes |
+| Alterar senha | Na edição (em branco mantém a atual) e no botão da chave da lista. Encerra as sessões abertas do usuário. Ninguém troca a própria senha pelo cadastro: isso fica em Minha conta |
+| Troca no primeiro acesso | Opcional. Padrão: marcada só quando a senha é gerada |
+| Enviar por e-mail | "Enviar usuário e senha por e-mail" no cadastro e no botão da chave. O e-mail traz o endereço do painel, o usuário e a senha. Sem e-mail configurado, a opção fica desativada, com o aviso. Se o envio falhar, a senha fica salva e o motivo aparece na tela |
+| Regra de senha | Mínimo 8, 1 maiúscula, 1 minúscula e 1 número. Vale no cadastro, na troca pelo usuário e na senha gerada. Saiu a regra "não pode conter o e-mail" |
+| Segurança | A senha nunca vai para a auditoria nem para o registro de envios. Admin de cliente só mexe nos usuários do próprio cliente; em outro cliente recebe 404 |
+| Banco | Migration `0007`: o registro de envios aceita o tipo "access". `PANEL_URL` passa a valer também para a API |
+
+Testes: 11 novos de integração, com servidor SMTP real de teste, e ao todo **161/161**; E2E **34/34** (novo `e2e/usuarios-senha.spec.ts`).
+
 ## Pendências
 
 - Aceite na VM e configuração do Gmail (acima).

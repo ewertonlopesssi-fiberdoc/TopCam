@@ -39,6 +39,7 @@ const KIND: Record<string, string> = {
   resolved: "Resolvido",
   digest: "Resumo",
   test: "Teste",
+  access: "Acesso",
 };
 
 export function IntegrationsCard() {

@@ -118,7 +118,13 @@ Postgres, Redis, API do MediaMTX, RTSP, HLS e a sinalização WebRTC **não** s�
 | Visualizador           | Só as câmeras liberadas para ele, somente leitura                                              |
 
 - **Câmeras → Nova Câmera** gera o código (CAM-###) e a chave exclusiva e mostra servidor, chave e URL completa para configurar a câmera. Depois, a chave só aparece em "Exibir dados de configuração" (registrado na auditoria). "Trocar chave" invalida a anterior e desconecta quem a usa.
-- **Usuários** cria o acesso com senha temporária (exibida uma única vez) e define, por usuário, quais câmeras ele vê.
+- **Usuários:** no cadastro, a senha pode ser **digitada** pelo administrador ou deixada em branco, e aí o sistema gera uma temporária, exibida uma única vez.
+  - **Regra de senha:** mínimo de 8 caracteres, com 1 maiúscula, 1 minúscula e 1 número.
+  - "Exigir troca de senha no primeiro acesso": marcada por padrão só quando a senha é gerada.
+  - "Enviar usuário e senha por e-mail": usa a integração de e-mail e mostra o endereço do painel (`PANEL_URL`).
+  - O botão da chave na lista altera a senha e pode enviar o acesso; as sessões abertas do usuário são encerradas.
+  - A auditoria e o registro de envios nunca guardam a senha.
+  - Também define, por usuário, quais câmeras ele vê.
 - **Ao Vivo:** árvore Empresa › Local › Grupo, mosaico 1/4/9/16, tela cheia, foco numa câmera (duplo clique ou clique na árvore), pausa, som, captura de imagem. "Automático" tenta **WebRTC** (menor atraso) e, se não conectar, usa **HLS**. O ícone de monitor na lista de Câmeras abre a câmera ao vivo.
 - **Segurança do ao vivo:** o navegador recebe só um endereço temporário `/live/<token>/…` (2 h), ligado ao usuário, à sessão e à câmera. A chave RTMP e o caminho interno nunca chegam ao navegador. O gateway reconfere o acesso a cada pedido (cache de 5 s); no WebRTC, o worker encerra a cada 10 s as conexões cujo acesso foi retirado (logout, usuário ou cliente desativado, permissão ou câmera retirada). Abrir o ao vivo fica na auditoria (um registro por usuário e câmera a cada 30 min).
 - **Gravação:** grava continuamente só as câmeras com **gravação** marcada no cadastro, em segmentos de 60 s (`cam/<id da câmera>/<início UTC>.mp4` no disco de vídeo). Cada segmento é conferido pelo worker (tamanho, SHA-256 e ffprobe) antes de contar: só então a câmera aparece como **Gravando**. Queda de sinal vira **lacuna** registrada (evento). Os segmentos vencidos pela retenção da câmera (24 h por padrão) são apagados do disco e do índice a cada minuto. Uma varredura da pasta indexa o que os avisos do servidor de mídia não informaram (reinício, API fora do ar) e alerta se aparecer gravação de câmera só ao vivo. Os detalhes da câmera mostram horas disponíveis, espaço usado e lacunas. A chave geral fica em **Configurações** (desliga todas as gravações de uma vez).

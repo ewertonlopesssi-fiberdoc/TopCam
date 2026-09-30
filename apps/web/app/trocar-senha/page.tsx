@@ -51,8 +51,8 @@ export default function TrocarSenhaPage() {
         </div>
         <h1 className="text-xl font-semibold">Defina sua senha</h1>
         <p className="mt-1 mb-5 text-sm text-muted">
-          Por segurança, troque a senha temporária antes de continuar. Use pelo menos 10 caracteres,
-          com letras e números.
+          Por segurança, troque a senha temporária antes de continuar. Use no mínimo 8 caracteres,
+          com 1 letra maiúscula, 1 minúscula e 1 número.
         </p>
         <ErrorBox error={error} />
         <div className="space-y-3">

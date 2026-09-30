@@ -7,11 +7,14 @@ import {
   hashPassword,
   isPlatformRole,
   isRoleKey,
+  parseEncryptionKey,
+  validatePassword,
   type RoleKey,
 } from "@topcam/shared";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { audit } from "../lib/audit.js";
+import { loadSmtp, sendAccessMail, smtpReady } from "../lib/mail.js";
 import { db, effectiveTenant, isPlatform, paged } from "../lib/ctx.js";
 import {
   badRequest,
@@ -31,18 +34,44 @@ const listQuery = pagination.extend({
   search: z.string().trim().max(100).optional(),
 });
 
+/**
+ * Senha no cadastro (opcional): em branco o sistema gera uma temporária.
+ * mustChangePassword: troca obrigatória no próximo acesso (padrão: só quando a senha é gerada).
+ * sendEmail: envia e-mail com usuário (o e-mail) e senha, pela integração de e-mail.
+ */
+const passwordFields = {
+  password: z.string().max(200).optional(),
+  mustChangePassword: z.boolean().optional(),
+  sendEmail: z.boolean().optional(),
+};
+
 const createBody = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().toLowerCase().email().max(200),
   role: z.string(),
   tenantId: z.string().uuid().nullable().optional(),
+  ...passwordFields,
 });
 
 const patchBody = z.object({
   name: z.string().trim().min(2).max(120).optional(),
   role: z.string().optional(),
   status: z.enum(["active", "disabled"]).optional(),
+  ...passwordFields,
 });
+
+const resetBody = z.object(passwordFields);
+
+/** Senha escolhida (validada) ou gerada, e se a troca no próximo acesso é obrigatória. */
+function choosePassword(b: { password?: string; mustChangePassword?: boolean }) {
+  const typed = b.password ? b.password : null;
+  if (typed) {
+    const problem = validatePassword(typed);
+    if (problem) throw badRequest(problem);
+  }
+  const password = typed ?? generateTempPassword();
+  return { password, generated: !typed, mustChange: b.mustChangePassword ?? !typed };
+}
 
 const permissionsBody = z.object({
   items: z
@@ -103,6 +132,40 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   const read = { preHandler: app.requirePermission("users.read") };
   const write = { preHandler: app.requirePermission("users.write") };
   const perms = { preHandler: app.requirePermission("permissions.write") };
+  const encKey = parseEncryptionKey(app.deps.env.STREAM_KEY_ENC_KEY);
+  const panelUrl = () =>
+    (app.deps.env.PANEL_URL || `http://${app.deps.env.PUBLIC_HOST}`).replace(/\/$/, "");
+
+  /** Envia os dados de acesso e registra na auditoria (sem a senha). */
+  async function emailAccess(
+    req: FastifyRequest,
+    target: { id: string; name: string; email: string; tenantId: string | null },
+    password: string,
+    mustChange: boolean,
+  ): Promise<{ sent: boolean; error: string | null }> {
+    const error = await sendAccessMail(app.deps.pool, encKey, {
+      to: target.email,
+      name: target.name,
+      password,
+      mustChange,
+      panelUrl: panelUrl(),
+    });
+    await db(app, req, (c) =>
+      audit(c, req, "user.access_emailed", {
+        tenantId: target.tenantId,
+        entityType: "user",
+        entityId: target.id,
+        data: { to: target.email, ok: !error, error },
+      }),
+    );
+    return { sent: !error, error };
+  }
+
+  // O formulário de usuários habilita "Enviar por e-mail" só com o e-mail configurado.
+  app.get("/api/v1/users/mail-status", write, async () => {
+    const s = await loadSmtp(app.deps.pool);
+    return { enabled: smtpReady(s) };
+  });
 
   app.get("/api/v1/users", read, async (req) => {
     const q = parseBody(listQuery, req.query);
@@ -144,8 +207,8 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     const b = parseBody(createBody, req.body);
     const tenantId = isPlatform(req) ? (b.tenantId ?? null) : req.user!.tenantId;
     const role = checkRole(req, b.role, tenantId);
-    const temporaryPassword = generateTempPassword();
-    const hashed = await hashPassword(temporaryPassword);
+    const pw = choosePassword(b);
+    const hashed = await hashPassword(pw.password);
     const user = await db(app, req, async (c) => {
       if (
         tenantId &&
@@ -159,20 +222,36 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
       }
       const { rows } = await c.query<{ id: string }>(
         `INSERT INTO users (tenant_id, role_id, name, email, password_hash, must_change_password)
-         VALUES ($1, (SELECT id FROM roles WHERE key = $2), $3, $4, $5, true) RETURNING id`,
-        [tenantId, role, b.name, b.email, hashed],
+         VALUES ($1, (SELECT id FROM roles WHERE key = $2), $3, $4, $5, $6) RETURNING id`,
+        [tenantId, role, b.name, b.email, hashed, pw.mustChange],
       );
       const id = rows[0]!.id;
       await audit(c, req, "user.created", {
         tenantId,
         entityType: "user",
         entityId: id,
-        data: { email: b.email, role },
+        data: {
+          email: b.email,
+          role,
+          password: pw.generated ? "gerada" : "definida pelo administrador",
+          mustChangePassword: pw.mustChange,
+        },
       });
-      return withLabel((await c.query(`${USER_SELECT} WHERE u.id = $1`, [id])).rows[0]);
+      return withLabel((await c.query(`${USER_SELECT} WHERE u.id = $1`, [id])).rows[0]) as {
+        id: string;
+        name: string;
+        email: string;
+        tenantId: string | null;
+      };
     });
-    // A senha temporária só é mostrada nesta resposta; no primeiro acesso a troca é obrigatória.
-    return reply.code(201).send({ user, temporaryPassword });
+    const mail = b.sendEmail ? await emailAccess(req, user, pw.password, pw.mustChange) : null;
+    // A senha gerada só aparece nesta resposta (a digitada o administrador já conhece).
+    return reply.code(201).send({
+      user,
+      ...(pw.generated ? { temporaryPassword: pw.password } : {}),
+      mustChangePassword: pw.mustChange,
+      mail,
+    });
   });
 
   app.patch<{ Params: { id: string } }>("/api/v1/users/:id", write, async (req) => {
@@ -181,7 +260,11 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     if (id === req.user!.id && (b.role || b.status)) {
       throw forbidden("Você não pode alterar o próprio papel ou desativar a si mesmo");
     }
-    return db(app, req, async (c) => {
+    if (id === req.user!.id && b.password)
+      throw forbidden("Para trocar a sua senha, use Configurações → Minha conta");
+    const pw = b.password ? choosePassword(b) : null;
+    const hashed = pw ? await hashPassword(pw.password) : null;
+    const updated = await db(app, req, async (c) => {
       const target = await loadTarget(c, req, id);
       if (!assignableRoles(req.user!.role).includes(target.role))
         throw forbidden("Você não pode alterar este usuário");
@@ -193,6 +276,23 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
           WHERE id = $1`,
         [id, b.name ?? null, role, b.status ?? null],
       );
+      if (pw && hashed) {
+        await c.query(
+          "UPDATE users SET password_hash = $2, must_change_password = $3 WHERE id = $1",
+          [id, hashed, pw.mustChange],
+        );
+        // Senha nova: as sessões abertas do usuário são encerradas.
+        await c.query(
+          "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+          [id],
+        );
+        await audit(c, req, "user.password_set", {
+          tenantId: target.tenantId,
+          entityType: "user",
+          entityId: id,
+          data: { mustChangePassword: pw.mustChange },
+        });
+      }
       if (b.status === "disabled") {
         await c.query(
           "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
@@ -204,12 +304,20 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         entityType: "user",
         entityId: id,
         data: {
-          changes: b,
+          changes: { name: b.name, role: b.role, status: b.status },
           before: { name: target.name, role: target.role, status: target.status },
         },
       });
-      return withLabel((await c.query(`${USER_SELECT} WHERE u.id = $1`, [id])).rows[0]);
+      return withLabel((await c.query(`${USER_SELECT} WHERE u.id = $1`, [id])).rows[0]) as {
+        id: string;
+        name: string;
+        email: string;
+        tenantId: string | null;
+      };
     });
+    const mail =
+      pw && b.sendEmail ? await emailAccess(req, updated, pw.password, pw.mustChange) : null;
+    return { ...updated, mail };
   });
 
   // Exclusão lógica: o registro fica para a auditoria; o e-mail é liberado para novo cadastro.
@@ -243,15 +351,18 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{ Params: { id: string } }>("/api/v1/users/:id/reset-password", write, async (req) => {
     const id = parseBody(uuid, req.params.id);
-    const temporaryPassword = generateTempPassword();
-    const hashed = await hashPassword(temporaryPassword);
-    await db(app, req, async (c) => {
+    const b = parseBody(resetBody, req.body ?? {});
+    if (id === req.user!.id)
+      throw forbidden("Para trocar a sua senha, use Configurações → Minha conta");
+    const pw = choosePassword(b);
+    const hashed = await hashPassword(pw.password);
+    const target = await db(app, req, async (c) => {
       const target = await loadTarget(c, req, id);
       if (!assignableRoles(req.user!.role).includes(target.role))
         throw forbidden("Você não pode alterar este usuário");
       await c.query(
-        "UPDATE users SET password_hash = $2, must_change_password = true WHERE id = $1",
-        [id, hashed],
+        "UPDATE users SET password_hash = $2, must_change_password = $3 WHERE id = $1",
+        [id, hashed, pw.mustChange],
       );
       await c.query(
         "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
@@ -261,9 +372,19 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
         tenantId: target.tenantId,
         entityType: "user",
         entityId: id,
+        data: {
+          password: pw.generated ? "gerada" : "definida pelo administrador",
+          mustChangePassword: pw.mustChange,
+        },
       });
+      return target;
     });
-    return { temporaryPassword };
+    const mail = b.sendEmail ? await emailAccess(req, target, pw.password, pw.mustChange) : null;
+    return {
+      ...(pw.generated ? { temporaryPassword: pw.password } : {}),
+      mustChangePassword: pw.mustChange,
+      mail,
+    };
   });
 
   // ------------------------------------------------------------------ permissões por câmera

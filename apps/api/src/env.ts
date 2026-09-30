@@ -17,6 +17,8 @@ const schema = z.object({
   MEDIA_GATEWAY_TOKEN: z.string().min(24),
   STREAM_KEY_ENC_KEY: z.string().min(40),
   PUBLIC_HOST: z.string().default("localhost"),
+  /** Endereço do painel usado nos e-mails de acesso (ex.: http://172.31.141.20). */
+  PANEL_URL: z.string().optional(),
   /** Raiz das gravações como o MediaMTX a vê (os hooks informam caminhos absolutos). */
   RECORDINGS_PATH: z.string().default("/recordings"),
   RTMP_PUBLIC_PORT: z.coerce.number().int().positive().default(1935),

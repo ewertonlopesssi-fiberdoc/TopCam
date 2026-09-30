@@ -228,7 +228,7 @@ function PasswordCard() {
       }}
     >
       <h2 className="mb-1 font-semibold">Trocar senha</h2>
-      <p className="mb-4 text-sm text-muted">Pelo menos 10 caracteres, com letras e números.</p>
+      <p className="mb-4 text-sm text-muted">Mínimo de 8 caracteres, com 1 letra maiúscula, 1 minúscula e 1 número.</p>
       <ErrorBox error={error} />
       <div className="space-y-3">
         <Field label="Senha atual">

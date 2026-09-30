@@ -1,6 +1,5 @@
-import { PLATFORM, getSetting, withScope } from "@topcam/db";
+import { PLATFORM, withScope } from "@topcam/db";
 import {
-  SMTP_DEFAULTS,
   encryptSecret,
   parseEncryptionKey,
   parseRecipients,
@@ -11,6 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { audit } from "../lib/audit.js";
 import { badRequest, parseBody } from "../lib/http.js";
+import { loadSmtp } from "../lib/mail.js";
 
 /**
  * Integrações (Fase 7) — só o Super Admin (settings.write).
@@ -43,11 +43,7 @@ export async function integrationRoutes(app: FastifyInstance): Promise<void> {
   const encKey = parseEncryptionKey(env.STREAM_KEY_ENC_KEY);
   const admin = { preHandler: app.requirePermission("settings.write") };
 
-  const load = async (): Promise<SmtpSettings> =>
-    withScope(pool, PLATFORM, async (c) => ({
-      ...SMTP_DEFAULTS,
-      ...(await getSetting<Partial<SmtpSettings>>(c, "integrations.smtp", {})),
-    }));
+  const load = (): Promise<SmtpSettings> => loadSmtp(pool);
 
   app.get("/api/v1/integrations", admin, async () => {
     const s = await load();
