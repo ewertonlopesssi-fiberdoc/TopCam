@@ -85,7 +85,7 @@ setting() { sql "UPDATE system_settings SET value = '$2'::jsonb WHERE key = '$1'
 
 stage() {
   local name="$1"; shift
-  local envs=(-e "BASE=http://gateway" -e "RUN=$RUN" -e "ACC_EMAIL=$ACC_EMAIL" -e "ACC_TEMP=$ACC_TEMP" -e "CAM1=$CAM1")
+  local envs=(-e "BASE=http://gateway:8080" -e "RUN=$RUN" -e "ACC_EMAIL=$ACC_EMAIL" -e "ACC_TEMP=$ACC_TEMP" -e "CAM1=$CAM1")
   for kv in "$@"; do envs+=(-e "$kv"); done
   dc exec -T "${envs[@]}" api node --input-type=module - "$name" < scripts/accept-phase6.mjs
 }

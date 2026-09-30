@@ -87,7 +87,7 @@ reconcile() { sql "INSERT INTO durable_jobs (type, payload) VALUES ('mediamtx.re
 
 stage() {
   local name="$1"; shift
-  local envs=(-e "BASE=http://gateway" -e "RUN=$RUN" -e "ACC_EMAIL=$ACC_EMAIL" -e "CAM1=$CAM1" -e "CAM2=$CAM2"
+  local envs=(-e "BASE=http://gateway:8080" -e "RUN=$RUN" -e "ACC_EMAIL=$ACC_EMAIL" -e "CAM1=$CAM1" -e "CAM2=$CAM2"
               -e "EXPORT_MAX_S=${EXPORT_MAX_S:-3600}")
   for kv in "$@"; do envs+=(-e "$kv"); done
   dc exec -T "${envs[@]}" api node --input-type=module - "$name" < scripts/accept-phase5.mjs

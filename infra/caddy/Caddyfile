@@ -1,6 +1,15 @@
 # TopCam — gateway HTTP(S).
-# HTTP na porta 80 (laboratório). HTTPS automático com o domínio definitivo
-# (PUBLIC_HOST) entra na Fase 8.
+#
+# Endereço público (SITE_ADDRESS no .env):
+#   ":80"                       → laboratório, só HTTP (padrão)
+#   "topcam.suportinet.com.br"  → HTTPS automático (Let's Encrypt): certificado emitido
+#                                 e renovado sozinho; HTTP redireciona para HTTPS.
+#                                 Exige DNS apontando para a VM e as portas 80 e 443 abertas.
+# HTTP_REDIRECT_ADDRESS="http://" (com HTTPS ligado) manda para o domínio quem abrir
+# o painel pelo IP (ex.: http://172.31.141.20).
+#
+# Endereço interno ":8080" (sem TLS, não publicado): mesmas rotas, usado pela
+# verificação de saúde do contêiner e pelos scripts de aceite dentro da rede do Docker.
 #
 # Rotas:
 #   /api/*          → api (painel e app)
@@ -15,10 +24,9 @@
 # aplicadas sozinhas.
 {
 	admin off
-	auto_https off
 }
 
-:80 {
+(topcam) {
 	encode zstd gzip
 	header {
 		-Server
@@ -26,6 +34,8 @@
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Com HTTPS, o navegador passa a usar só HTTPS neste domínio (ignorado em HTTP).
+		Strict-Transport-Security "max-age=31536000"
 	}
 
 	# Rotas internas e de saúde nunca são expostas. "handle" é avaliado na ordem
@@ -125,4 +135,17 @@
 		output stdout
 		format json
 	}
+}
+
+{$SITE_ADDRESS::80} {
+	import topcam
+}
+
+# Quem abre pelo IP (ou outro nome) é mandado ao domínio, quando HTTPS estiver ligado.
+{$HTTP_REDIRECT_ADDRESS:http://redirecionamento.invalid} {
+	redir https://{$PUBLIC_HOST}{uri} permanent
+}
+
+:8080 {
+	import topcam
 }

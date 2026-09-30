@@ -5,7 +5,7 @@
 #   1. instala Docker Engine + Compose (repositório oficial da Docker);
 #   2. limita logs do Docker e do journald;
 #   3. formata (só com confirmação) e monta o disco de vídeo em /srv/topcam/recordings;
-#   4. opcional: firewall nftables para os serviços do host (SSH só da rede de administração).
+#   4. firewall: só orienta; é instalado depois com scripts/host/topcam-host (Fase 8).
 #
 # Uso (como root):
 #   ./prepare-vm.sh --video-disk /dev/sdb [--firewall --admin-cidr 192.168.10.0/24] [--skip-docker]
@@ -131,31 +131,12 @@ else
   mkdir -p "$MOUNT_POINT"
 fi
 
-# ------------------------------------------------------------------ 4. firewall do host (opcional)
+# ------------------------------------------------------------------ 4. firewall do host
+# Desde a Fase 8 o firewall é do serviço do host (scripts/host/topcam-host), com as
+# redes do SSH editáveis no painel. Ele precisa do TopCam no ar, então vem depois.
 if [ "$FIREWALL" -eq 1 ]; then
-  [ -n "$ADMIN_CIDR" ] || die "--firewall exige --admin-cidr (rede de onde você administra por SSH)"
-  log "aplicando nftables: SSH só de $ADMIN_CIDR; 80/443/1935/1936 abertos"
-  cat > /etc/nftables.conf <<EOF
-#!/usr/sbin/nft -f
-# TopCam — firewall do host. As portas publicadas pelo Docker são tratadas
-# pela cadeia FORWARD do próprio Docker; restrinja-as também no firewall do Proxmox.
-flush ruleset
-table inet filter {
-  chain input {
-    type filter hook input priority 0; policy drop;
-    iif lo accept
-    ct state established,related accept
-    meta l4proto { icmp, ipv6-icmp } accept
-    ip saddr $ADMIN_CIDR tcp dport 22 accept
-    tcp dport { 80, 443, 1935, 1936 } accept
-  }
-  chain forward { type filter hook forward priority 0; policy accept; }
-  chain output { type filter hook output priority 0; policy accept; }
-}
-EOF
-  systemctl enable --now nftables >/dev/null
-  nft -f /etc/nftables.conf
-  systemctl restart docker   # recria as regras do Docker após o flush
+  log "firewall: instale depois de subir o TopCam, com a rede de onde você administra:"
+  log "  scripts/host/topcam-host install --ssh ${ADMIN_CIDR:-<rede/máscara>}"
 fi
 
 log "pronto. Próximos passos:"
@@ -163,3 +144,4 @@ log "  1) git clone <repositório> /opt/topcam && cd /opt/topcam"
 log "  2) scripts/generate-env.sh --public-host video.seudominio.com.br --admin-email voce@dominio"
 log "  3) docker compose up -d --build"
 log "  4) scripts/accept-phase1.sh   (teste de aceite com o transmissor de teste)"
+log "  5) scripts/host/topcam-host install --ssh <rede de administração>   (firewall)"

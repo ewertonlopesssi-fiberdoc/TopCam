@@ -8,7 +8,7 @@
 //
 // Saída: "OUT|<nome>|<valor>" e "RESULT|<id>|PASS|FAIL|<critério>|<evidência>".
 
-const BASE = process.env.BASE ?? "http://gateway";
+const BASE = process.env.BASE ?? "http://gateway:8080";
 const RUN = process.env.RUN ?? String(Date.now()).slice(-6);
 const { ACC_EMAIL, ACC_TEMP, CAM1 } = process.env;
 const PASSWORD = `AceiteFase6-${RUN}-Ok`;

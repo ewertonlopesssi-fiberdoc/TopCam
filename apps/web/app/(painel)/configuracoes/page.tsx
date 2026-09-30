@@ -4,6 +4,7 @@ import { Loader2, Pencil } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ErrorBox, Field, Modal, PageHeader, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
+import { FirewallCard } from "@/components/firewall-card";
 import { IntegrationsCard } from "@/components/integrations-card";
 import { useAuth } from "@/lib/auth";
 import { fmtBytes } from "@/lib/format";
@@ -228,7 +229,9 @@ function PasswordCard() {
       }}
     >
       <h2 className="mb-1 font-semibold">Trocar senha</h2>
-      <p className="mb-4 text-sm text-muted">Mínimo de 8 caracteres, com 1 letra maiúscula, 1 minúscula e 1 número.</p>
+      <p className="mb-4 text-sm text-muted">
+        Mínimo de 8 caracteres, com 1 letra maiúscula, 1 minúscula e 1 número.
+      </p>
       <ErrorBox error={error} />
       <div className="space-y-3">
         <Field label="Senha atual">
@@ -411,7 +414,7 @@ export default function ConfiguracoesPage() {
                     ],
                     [
                       "Cookie só por HTTPS",
-                      s.cookieSecure ? "Sim" : "Não (laboratório em HTTP — ligar na Fase 8)",
+                      s.cookieSecure ? "Sim" : "Não (painel em HTTP — ligar com scripts/https.sh)",
                     ],
                   ].map(([k, v]) => (
                     <div key={String(k)} className="grid grid-cols-5 gap-2">
@@ -428,6 +431,11 @@ export default function ConfiguracoesPage() {
       {auth.can("settings.write") && (
         <div className="mt-5">
           <IntegrationsCard />
+        </div>
+      )}
+      {auth.can("settings.write") && (
+        <div className="mt-5">
+          <FirewallCard />
         </div>
       )}
       {auth.isPlatform && (

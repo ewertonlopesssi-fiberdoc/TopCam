@@ -1,0 +1,355 @@
+#!/usr/bin/env bash
+# TopCam — serviço do host (roda no Debian, fora do Docker, como root).
+#
+# Faz o que nenhum contêiner deve fazer:
+#   * firewall: lê no banco as redes liberadas para o SSH (Configurações → Firewall),
+#     valida de novo e aplica as regras nftables de uma vez (tabela própria
+#     "inet topcam_fw"; as regras do Docker não são tocadas). Se algo estiver
+#     inválido ou o banco não responder, mantém as regras atuais.
+#   * certificado do RTMPS: copia o certificado HTTPS (emitido pelo gateway) para
+#     .data/tls, legível pelo servidor de mídia, e o reinicia quando o certificado
+#     é renovado (entre 03:00 e 05:00, para não derrubar câmeras de dia).
+#
+# Uso (como root):
+#   scripts/host/topcam-host install --ssh 172.31.0.0/16 --ssh 100.65.0.0/21 ...
+#   topcam-host sync             # o que o timer roda a cada minuto
+#   topcam-host status
+#   topcam-host reset            # EMERGÊNCIA: volta às redes da instalação
+#   topcam-host disable          # remove o firewall do TopCam e para o serviço (tudo liberado)
+#   topcam-host enable           # religa depois de um disable
+#   topcam-host render CIDR...   # só mostra as regras que seriam aplicadas
+#
+# Sem acesso por SSH? O console do Proxmox não passa por este firewall:
+# entre por ele e rode "topcam-host reset" (ou "topcam-host disable").
+
+set -uo pipefail
+
+VERSION=1
+CONF=/etc/topcam/host.conf
+STATE=/var/lib/topcam
+TABLE="inet topcam_fw"
+PUBLIC_TCP="80, 443, 1935, 1936, 8189"
+
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+die() { echo "erro: $*" >&2; exit 1; }
+
+# ------------------------------------------------------------------ validação
+# IPv4 "a.b.c.d/n" com n >= 8, ou IPv6 com /n >= 16. Nada de 0.0.0.0/0.
+valid_cidr() {
+  local c="$1" ip mask
+  [[ "$c" == */* ]] || return 1
+  ip="${c%/*}" mask="${c#*/}"
+  [[ "$mask" =~ ^[0-9]{1,3}$ ]] || return 1
+  if [[ "$ip" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    local o
+    for o in "${BASH_REMATCH[@]:1}"; do [ "$o" -le 255 ] || return 1; done
+    [ "$mask" -ge 8 ] && [ "$mask" -le 32 ]
+  elif [[ "$ip" =~ ^[0-9a-fA-F:]+$ && "$ip" == *:* ]]; then
+    [ "$mask" -ge 16 ] && [ "$mask" -le 128 ]
+  else
+    return 1
+  fi
+}
+
+ip2int() { local IFS=.; read -r a b c d <<<"$1"; echo $(( (a << 24) | (b << 16) | (c << 8) | d )); }
+# in_cidr 100.65.3.7 100.65.0.0/21 → 0 se pertence (só IPv4)
+in_cidr() {
+  local ip="$1" net="${2%/*}" mask="${2#*/}"
+  [[ "$ip" == *.* && "$net" == *.* ]] || return 1
+  local m=$(( mask == 0 ? 0 : (0xFFFFFFFF << (32 - mask)) & 0xFFFFFFFF ))
+  [ $(( $(ip2int "$ip") & m )) -eq $(( $(ip2int "$net") & m )) ]
+}
+
+# ------------------------------------------------------------------ regras
+render() {
+  local v4=() v6=() c
+  for c in "$@"; do
+    if [[ "$c" == *:* ]]; then v6+=("$c"); else v4+=("$c"); fi
+  done
+  local j4 j6
+  j4=$(IFS=,; echo "${v4[*]:-}" | sed 's/,/, /g')
+  j6=$(IFS=,; echo "${v6[*]:-}" | sed 's/,/, /g')
+  cat <<EOF
+# TopCam — firewall do host (gerado por topcam-host; não edite à mão)
+table $TABLE
+delete table $TABLE
+table $TABLE {
+	set ssh_v4 {
+		type ipv4_addr
+		flags interval
+$( [ ${#v4[@]} -gt 0 ] && printf '\t\telements = { %s }\n' "$j4" )
+	}
+	set ssh_v6 {
+		type ipv6_addr
+		flags interval
+$( [ ${#v6[@]} -gt 0 ] && printf '\t\telements = { %s }\n' "$j6" )
+	}
+	chain input {
+		type filter hook input priority 0; policy drop;
+		ct state established,related accept
+		ct state invalid drop
+		iif "lo" accept
+		# Contêineres falando com o host
+		iifname "docker0" accept
+		iifname "br-*" accept
+		meta l4proto { icmp, ipv6-icmp } accept
+		# SSH só das redes liberadas no painel
+		tcp dport 22 ip saddr @ssh_v4 accept
+		tcp dport 22 ip6 saddr @ssh_v6 accept
+		# Serviços públicos do TopCam: painel (80/443), câmeras (1935/1936), WebRTC (8189)
+		tcp dport { $PUBLIC_TCP } accept
+		udp dport 8189 accept
+		# DHCP (se a VM usar)
+		udp sport 67 udp dport 68 accept
+		counter drop
+	}
+}
+EOF
+}
+
+# ------------------------------------------------------------------ banco
+load_conf() {
+  [ -f "$CONF" ] || die "não instalado ($CONF não existe). Rode: scripts/host/topcam-host install --ssh <rede> ..."
+  # shellcheck disable=SC1090
+  . "$CONF"
+  [ -n "${TOPCAM_DIR:-}" ] || die "TOPCAM_DIR ausente em $CONF"
+}
+psqlq() {
+  (cd "$TOPCAM_DIR" && timeout 20 docker compose exec -T postgres \
+    psql -U topcam_owner -d topcam -v ON_ERROR_STOP=1 -Atq -c "$1") 2>/dev/null
+}
+write_status() { # write_status <json>
+  local j="${1//\'/\'\'}"
+  psqlq "INSERT INTO system_settings (key, value) VALUES ('firewall.status', '$j'::jsonb)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()" >/dev/null
+}
+json_list() { local out="" x; for x in "$@"; do out+="${out:+,}\"$x\""; done; echo "[$out]"; }
+
+# ------------------------------------------------------------------ firewall
+apply_rules() { # apply_rules CIDR... → 0 ok
+  local file
+  file=$(mktemp)
+  render "$@" >"$file"
+  if ! nft -c -f "$file" 2>"$file.err"; then
+    LAST_ERROR="regras recusadas pelo nftables: $(tr '\n' ' ' <"$file.err" | head -c 300)"
+    rm -f "$file" "$file.err"
+    return 1
+  fi
+  nft -f "$file" 2>"$file.err" || {
+    LAST_ERROR="falha ao aplicar: $(tr '\n' ' ' <"$file.err" | head -c 300)"
+    rm -f "$file" "$file.err"
+    return 1
+  }
+  mkdir -p "$STATE"
+  cp "$file" "$STATE/firewall.nft"
+  rm -f "$file" "$file.err"
+}
+
+firewall_sync() {
+  local force="${1:-0}" rows c good=() bad=() hash
+  # Depois de um reinício a tabela some: volta com as últimas regras aplicadas antes
+  # mesmo de o banco subir.
+  if ! nft list table $TABLE >/dev/null 2>&1 && [ -s "$STATE/firewall.nft" ]; then
+    nft -f "$STATE/firewall.nft" && log "últimas regras restauradas após reinício"
+  fi
+  if ! rows=$(psqlq "SELECT cidr FROM firewall_ssh_networks ORDER BY id"); then
+    log "banco indisponível: regras atuais mantidas"
+    return 0
+  fi
+  for c in $rows; do
+    if valid_cidr "$c"; then good+=("$c"); else bad+=("$c"); fi
+  done
+  local now; now=$(date -u +%FT%TZ)
+  if [ ${#good[@]} -eq 0 ]; then
+    write_status "{\"ok\": false, \"error\": \"lista de redes vazia ou inválida: regras atuais mantidas\", \"checked_at\": \"$now\", \"agent_version\": $VERSION}"
+    log "lista vazia/inválida: regras atuais mantidas"
+    return 1
+  fi
+  hash=$(printf '%s\n' "${good[@]}" | sha256sum | cut -c1-16)
+  if [ "$force" != 1 ] && [ "$(cat "$STATE/firewall.hash" 2>/dev/null)" = "$hash" ] && nft list table $TABLE >/dev/null 2>&1; then
+    # Nada mudou: só registra que o serviço está vivo.
+    psqlq "UPDATE system_settings SET value = jsonb_set(value, '{checked_at}', to_jsonb('$now'::text)) WHERE key = 'firewall.status'" >/dev/null
+    return 0
+  fi
+  LAST_ERROR=""
+  if apply_rules "${good[@]}"; then
+    echo "$hash" >"$STATE/firewall.hash"
+    write_status "{\"ok\": true, \"applied_at\": \"$now\", \"checked_at\": \"$now\", \"networks\": $(json_list "${good[@]}"), \"ignored\": $(json_list "${bad[@]}"), \"agent_version\": $VERSION}"
+    log "firewall aplicado: SSH de ${good[*]}"
+  else
+    write_status "{\"ok\": false, \"error\": \"${LAST_ERROR//\"/\'}\", \"checked_at\": \"$now\", \"agent_version\": $VERSION}"
+    log "firewall NÃO aplicado: $LAST_ERROR"
+    return 1
+  fi
+}
+
+# ------------------------------------------------------------------ certificado do RTMPS
+tls_sync() {
+  local env="$TOPCAM_DIR/.env" site
+  site=$(grep -E '^SITE_ADDRESS=' "$env" 2>/dev/null | cut -d= -f2- | tr -d '"')
+  [[ -n "$site" && "$site" != :* && "$site" != http://* ]] || return 0   # sem HTTPS: nada a fazer
+  local dir="$TOPCAM_DIR/.data/tls" crt key
+  crt=$(cd "$TOPCAM_DIR" && docker compose exec -T gateway sh -c \
+    "cat /data/caddy/certificates/*/$site/$site.crt" 2>/dev/null) || return 0
+  key=$(cd "$TOPCAM_DIR" && docker compose exec -T gateway sh -c \
+    "cat /data/caddy/certificates/*/$site/$site.key" 2>/dev/null) || return 0
+  [ -n "$crt" ] && [ -n "$key" ] || return 0
+  mkdir -p "$dir"
+  if [ "$crt" = "$(cat "$dir/server.crt" 2>/dev/null)" ]; then
+    [ -f "$STATE/tls.restart-pending" ] || return 0
+  else
+    local first=0
+    [ -f "$dir/server.crt" ] || first=1
+    printf '%s\n' "$crt" >"$dir/server.crt.new" && printf '%s\n' "$key" >"$dir/server.key.new"
+    chown 1000:1000 "$dir"/server.*.new && chmod 644 "$dir/server.crt.new" && chmod 600 "$dir/server.key.new"
+    mv "$dir/server.crt.new" "$dir/server.crt" && mv "$dir/server.key.new" "$dir/server.key"
+    log "certificado copiado para o RTMPS"
+    [ "$first" = 1 ] && return 0
+    touch "$STATE/tls.restart-pending"
+  fi
+  # Renovação com RTMPS ligado: reinicia o servidor de mídia de madrugada.
+  local enc hour
+  enc=$(grep -E '^RTMP_ENCRYPTION=' "$env" | cut -d= -f2- | tr -d '"')
+  [ "${enc:-no}" = "no" ] && { rm -f "$STATE/tls.restart-pending"; return 0; }
+  hour=$(date +%H)
+  if [ "$hour" -ge 3 ] && [ "$hour" -lt 5 ]; then
+    (cd "$TOPCAM_DIR" && docker compose restart mediamtx >/dev/null 2>&1) && rm -f "$STATE/tls.restart-pending"
+    log "servidor de mídia reiniciado com o certificado renovado"
+  fi
+}
+
+# ------------------------------------------------------------------ comandos
+cmd_install() {
+  [ "$(id -u)" = 0 ] || die "rode como root"
+  local nets=() dir
+  dir=$(cd "$(dirname "$0")/../.." && pwd)
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --ssh) nets+=("$2"); shift 2 ;;
+      --dir) dir="$2"; shift 2 ;;
+      *) die "opção desconhecida: $1" ;;
+    esac
+  done
+  [ ${#nets[@]} -gt 0 ] || die "informe ao menos uma rede: --ssh 172.31.0.0/16 (repita para várias)"
+  local c
+  for c in "${nets[@]}"; do valid_cidr "$c" || die "rede inválida: $c (use IP/máscara; mínimo /8)"; done
+  # Trava 1: a sua sessão atual precisa estar numa das redes.
+  local me="${SSH_CLIENT%% *}"
+  if [ -n "$me" ]; then
+    local inside=0
+    for c in "${nets[@]}"; do in_cidr "$me" "$c" && inside=1; done
+    [ "$inside" = 1 ] || die "a sua sessão vem de $me, que não está nas redes informadas: você ficaria trancado para fora"
+  fi
+  command -v nft >/dev/null || { log "instalando nftables"; apt-get install -y -qq nftables >/dev/null || die "falha ao instalar nftables"; }
+  [ -f "$dir/compose.yaml" ] || die "compose.yaml não encontrado em $dir"
+
+  # Firewall antigo do prepare-vm.sh (tabela "inet filter" com "flush ruleset", que
+  # também apagaria as regras do Docker a cada reinício): é substituído por este.
+  if grep -q "TopCam — firewall do host" /etc/nftables.conf 2>/dev/null; then
+    cp /etc/nftables.conf "/etc/nftables.conf.topcam-antigo.$(date +%Y%m%d%H%M%S)"
+    printf '#!/usr/sbin/nft -f\n# Firewall do TopCam: tabela inet topcam_fw, aplicada pelo topcam-host.\n' >/etc/nftables.conf
+    nft delete table inet filter 2>/dev/null
+    log "firewall antigo do prepare-vm.sh removido (cópia em /etc/nftables.conf.topcam-antigo.*)"
+  fi
+  mkdir -p /etc/topcam "$STATE"
+  printf 'TOPCAM_DIR=%s\nDEFAULT_SSH="%s"\n' "$dir" "${nets[*]}" >"$CONF"
+  ln -sf "$dir/scripts/host/topcam-host" /usr/local/sbin/topcam-host
+  cat >/etc/systemd/system/topcam-host.service <<EOF
+[Unit]
+Description=TopCam — firewall e certificado do RTMPS
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/topcam-host sync
+EOF
+  cat >/etc/systemd/system/topcam-host.timer <<EOF
+[Unit]
+Description=TopCam — sincroniza firewall e certificado a cada minuto
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+
+  TOPCAM_DIR="$dir"
+  # Primeira lista: as redes informadas (só se o painel ainda não tiver nenhuma).
+  local n
+  n=$(psqlq "SELECT count(*) FROM firewall_ssh_networks") || die "banco indisponível (o TopCam está no ar?)"
+  if [ "$n" = 0 ]; then
+    for c in "${nets[@]}"; do
+      psqlq "INSERT INTO firewall_ssh_networks (cidr, description) VALUES ('$c', 'instalação')" >/dev/null
+    done
+    log "redes iniciais gravadas: ${nets[*]}"
+  else
+    log "o painel já tem $n rede(s): elas é que valem (as da instalação ficam para o reset)"
+  fi
+
+  # Trava 2: aplica e desfaz sozinho em 120 s se você não confirmar.
+  firewall_sync 1 || die "firewall não aplicado"
+  echo
+  echo ">>> Firewall aplicado. ABRA UMA NOVA SESSÃO SSH para testar."
+  echo ">>> Se conseguir entrar, digite OK aqui em até 120 segundos."
+  echo ">>> Sem confirmação, o firewall é desfeito sozinho."
+  local ans=""
+  read -r -t 120 ans || true
+  if [ "$ans" != "OK" ] && [ "$ans" != "ok" ]; then
+    nft delete table $TABLE 2>/dev/null
+    rm -f "$STATE/firewall.hash"
+    die "sem confirmação: firewall desfeito. Nada ficou bloqueado."
+  fi
+  systemctl enable --now topcam-host.timer >/dev/null
+  log "instalado: o firewall segue a lista do painel (Configurações → Firewall), conferida a cada minuto"
+}
+
+cmd_reset() {
+  load_conf
+  # shellcheck disable=SC2086
+  set -- $DEFAULT_SSH
+  local c
+  psqlq "DELETE FROM firewall_ssh_networks" >/dev/null || log "banco indisponível: aplicando só no host"
+  for c in "$@"; do
+    psqlq "INSERT INTO firewall_ssh_networks (cidr, description) VALUES ('$c', 'reset de emergência')" >/dev/null
+  done
+  LAST_ERROR=""
+  apply_rules "$@" || die "$LAST_ERROR"
+  printf '%s\n' "$@" | sha256sum | cut -c1-16 >"$STATE/firewall.hash"
+  log "reset: SSH liberado de $*"
+}
+
+cmd_status() {
+  load_conf
+  echo "pasta: $TOPCAM_DIR"
+  echo "timer: $(systemctl is-active topcam-host.timer 2>/dev/null)"
+  echo "redes da instalação: $DEFAULT_SSH"
+  echo "no painel: $(psqlq "SELECT string_agg(cidr::text, ' ' ORDER BY id) FROM firewall_ssh_networks" || echo '(banco indisponível)')"
+  echo "status: $(psqlq "SELECT value FROM system_settings WHERE key = 'firewall.status'")"
+  nft list table $TABLE 2>/dev/null | grep -E 'elements|dport' || echo "(firewall do TopCam não aplicado)"
+}
+
+case "${1:-}" in
+  install) shift; cmd_install "$@" ;;
+  sync) load_conf; firewall_sync 0; tls_sync ;;
+  apply) load_conf; firewall_sync 1 ;;
+  reset) cmd_reset ;;
+  disable)
+    systemctl disable --now topcam-host.timer >/dev/null 2>&1
+    nft delete table $TABLE 2>/dev/null
+    rm -f "$STATE/firewall.hash" "$STATE/firewall.nft"
+    log "firewall do TopCam removido e serviço parado (religar: topcam-host enable)" ;;
+  enable)
+    load_conf
+    firewall_sync 1 || exit 1
+    systemctl enable --now topcam-host.timer >/dev/null
+    log "serviço religado" ;;
+  status) cmd_status ;;
+  render) shift; for c in "$@"; do valid_cidr "$c" || die "rede inválida: $c"; done; render "$@" ;;
+  valid) valid_cidr "${2:-}" && echo ok || { echo inválida; exit 1; } ;;
+  *) sed -n '2,25p' "$0"; exit 2 ;;
+esac

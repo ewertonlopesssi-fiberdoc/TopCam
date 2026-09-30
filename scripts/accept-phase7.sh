@@ -80,7 +80,7 @@ stop_tx() { docker rm -f topcam-tx7-CAM-001 >/dev/null 2>&1; }
 GESTORES=""
 stage() {
   local name="$1"; shift
-  local envs=(-e "BASE=http://gateway" -e "RUN=$RUN" -e "ACC_EMAIL=$ACC_EMAIL" -e "ACC_TEMP=$ACC_TEMP"
+  local envs=(-e "BASE=http://gateway:8080" -e "RUN=$RUN" -e "ACC_EMAIL=$ACC_EMAIL" -e "ACC_TEMP=$ACC_TEMP"
     -e "CAM1=$CAM1" -e "ALFA=$ALFA" -e "SOL=$SOL" -e "MAIL_TO=$MAIL_TO" -e "T_START_ISO=$T_START_ISO")
   for kv in "$@"; do envs+=(-e "$kv"); done
   dc exec -T "${envs[@]}" api node --input-type=module - "$name" < scripts/accept-phase7.mjs

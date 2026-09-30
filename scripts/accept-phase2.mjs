@@ -7,10 +7,10 @@
 //   node - clean  → remove as câmeras de aceite e cancela os clientes de aceite
 //
 // Saída: linhas "RESULT|<id>|PASS|FAIL|<critério>|<evidência>" e "OUT|<nome>|<valor>".
-// Variáveis: BASE (http://gateway), ACC_EMAIL, ACC_TEMP (setup), ACC_PASSWORD, RUN (sufixo único),
+// Variáveis: BASE (http://gateway:8080), ACC_EMAIL, ACC_TEMP (setup), ACC_PASSWORD, RUN (sufixo único),
 //            CAM_ID (live/clean).
 
-const BASE = process.env.BASE ?? "http://gateway";
+const BASE = process.env.BASE ?? "http://gateway:8080";
 const RUN = process.env.RUN ?? String(Date.now()).slice(-6);
 const ACC_EMAIL = process.env.ACC_EMAIL;
 const ACC_PASSWORD = process.env.ACC_PASSWORD;

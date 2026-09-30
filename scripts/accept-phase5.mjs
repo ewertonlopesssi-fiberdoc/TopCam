@@ -12,7 +12,7 @@
 import { execFileSync } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 
-const BASE = process.env.BASE ?? "http://gateway";
+const BASE = process.env.BASE ?? "http://gateway:8080";
 const RUN = process.env.RUN ?? String(Date.now()).slice(-6);
 const { ACC_EMAIL, ACC_TEMP, ACC_PASSWORD, CAM1, CAM2 } = process.env;
 const GAP_AT = Number(process.env.GAP_AT ?? NaN); // instante (ms) em que o transmissor caiu

@@ -53,7 +53,7 @@ record() { # record <id> <PASS|FAIL> <critério> <evidência>
 # Executa uma etapa do accept-phase2.mjs dentro do contêiner da API (Node 22, rede interna).
 stage() {
   local name="$1"; shift
-  local envs=(-e "BASE=http://gateway" -e "RUN=$RUN" -e "ACC_EMAIL=$ACC_EMAIL" -e "ACC_PASSWORD=$ACC_PASSWORD")
+  local envs=(-e "BASE=http://gateway:8080" -e "RUN=$RUN" -e "ACC_EMAIL=$ACC_EMAIL" -e "ACC_PASSWORD=$ACC_PASSWORD")
   for kv in "$@"; do envs+=(-e "$kv"); done
   dc exec -T "${envs[@]}" api node --input-type=module - "$name" < scripts/accept-phase2.mjs
 }

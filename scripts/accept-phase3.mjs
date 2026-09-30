@@ -11,7 +11,7 @@ import { execFileSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { writeFileSync } from "node:fs";
 
-const BASE = process.env.BASE ?? "http://gateway";
+const BASE = process.env.BASE ?? "http://gateway:8080";
 const RUN = process.env.RUN ?? String(Date.now()).slice(-6);
 const ACC_EMAIL = process.env.ACC_EMAIL;
 const ACC_PASSWORD = process.env.ACC_PASSWORD;
