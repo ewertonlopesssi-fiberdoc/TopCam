@@ -268,6 +268,10 @@ describe("integrações: e-mail (SMTP)", () => {
     const bad = await a.post("/api/v1/integrations/smtp/test", {});
     expect(bad.statusCode).toBe(400);
     expect(bad.json().message).toContain("senha de app");
+    // Destinatário do teste que não é e-mail: mensagem clara em português, sem envio.
+    const notEmail = await a.post("/api/v1/integrations/smtp/test", { to: "login teste TopCam" });
+    expect(notEmail.statusCode).toBe(400);
+    expect(notEmail.json().message).toContain('Informe um e-mail válido em "Enviar teste para"');
     const g = (await a.get("/api/v1/integrations")).json();
     expect(g.notifications.slice(0, 2).map((n: { status: string }) => n.status)).toEqual([
       "failed",

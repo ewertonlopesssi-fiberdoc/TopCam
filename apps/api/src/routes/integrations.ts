@@ -135,9 +135,15 @@ export async function integrationRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  const testBody = z.object({ to: email.optional() }).strict();
+  const testBody = z.object({ to: z.string().max(200).optional() }).strict();
   app.post("/api/v1/integrations/smtp/test", admin, async (req) => {
-    const b = parseBody(testBody, req.body ?? {});
+    const raw = parseBody(testBody, req.body ?? {});
+    const typed = raw.to?.trim() ? email.safeParse(raw.to) : null;
+    if (typed && !typed.success)
+      throw badRequest(
+        'Informe um e-mail válido em "Enviar teste para" (ou deixe em branco para usar os destinatários salvos).',
+      );
+    const b = { to: typed?.success ? typed.data : undefined };
     const s = await load();
     const to = b.to ? [b.to] : s.recipients;
     if (!to.length) throw badRequest("Informe um destinatário para o teste");

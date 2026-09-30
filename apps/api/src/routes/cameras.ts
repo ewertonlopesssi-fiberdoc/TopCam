@@ -42,6 +42,15 @@ const baseBody = z.object({
 });
 
 const createBody = baseBody.extend({ tenantId: z.string().uuid() });
+
+/** Transferência para outro cliente: destino, local/grupo no destino e o que fazer com a chave. */
+const transferBody = z.object({
+  tenantId: z.string().uuid(),
+  locationId: z.string().uuid(),
+  groupId: z.string().uuid().nullable().optional(),
+  /** true (padrão): o mesmo equipamento continua transmitindo sem reconfigurar. */
+  keepKey: z.boolean().default(true),
+});
 const patchBody = baseBody.partial().extend({ enabled: z.boolean().optional() });
 
 const CAMERA_SELECT = `
@@ -383,5 +392,131 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
     });
     await wakeWorker(app);
     return { server: serverUrl, streamKey: key, url: `${serverUrl}/${key}` };
+  });
+
+  // ------------------------------------------------------------------ transferência
+  /**
+   * Transfere a câmera para outro cliente (só a equipe da plataforma).
+   * A câmera antiga é retirada do cliente de origem com o histórico dele (gravações,
+   * eventos, alertas, exportações e relatórios ficam na origem e seguem a retenção);
+   * uma câmera nova é criada no destino, com o próximo código, a mesma configuração
+   * e — por padrão — a mesma chave RTMP (o equipamento não precisa ser reconfigurado).
+   * Tudo numa transação: ou transfere, ou nada muda.
+   */
+  app.post<{ Params: { id: string } }>("/api/v1/cameras/:id/transfer", keys, async (req, reply) => {
+    const id = parseBody(uuid, req.params.id);
+    const b = parseBody(transferBody, req.body);
+    const freshKey = b.keepKey ? null : generateStreamKey();
+    const result = await db(app, req, async (c) => {
+      const cur = await loadCamera(c, req, id, true);
+      if (cur.tenantId === b.tenantId) throw badRequest("A câmera já pertence a este cliente");
+      const old = (
+        await c.query<{
+          name: string;
+          description: string | null;
+          stream_key_hash: string;
+          stream_key_enc: string;
+          stream_key_prefix: string;
+          recording_enabled: boolean;
+          retention_policy_id: string | null;
+          retention_tenant: string | null;
+          ingest_node_id: string | null;
+          storage_node_id: string | null;
+          tenant_name: string;
+        }>(
+          `SELECT c.name, c.description, c.stream_key_hash, c.stream_key_enc, c.stream_key_prefix,
+                  c.recording_enabled, c.retention_policy_id, r.tenant_id AS retention_tenant,
+                  c.ingest_node_id, c.storage_node_id, t.name AS tenant_name
+             FROM cameras c JOIN tenants t ON t.id = c.tenant_id
+             LEFT JOIN retention_policies r ON r.id = c.retention_policy_id
+            WHERE c.id = $1`,
+          [id],
+        )
+      ).rows[0]!;
+      const t = (
+        await c.query<{ name: string; max_cameras: number; n: number }>(
+          `SELECT t.name, p.max_cameras,
+                  (SELECT count(*)::int FROM cameras c WHERE c.tenant_id = t.id AND c.deleted_at IS NULL) AS n
+             FROM tenants t JOIN plans p ON p.id = t.plan_id WHERE t.id = $1 AND t.deleted_at IS NULL`,
+          [b.tenantId],
+        )
+      ).rows[0];
+      if (!t) throw badRequest("Cliente de destino inexistente");
+      if (t.n >= t.max_cameras)
+        throw conflict(
+          `Limite do plano do cliente de destino atingido (${t.max_cameras} câmeras).`,
+          "plan_limit",
+        );
+      await validatePlacement(c, b.tenantId, b.locationId, b.groupId);
+      // Política de retenção própria do cliente de origem não vale no destino: usa a padrão.
+      const retention =
+        old.retention_tenant && old.retention_tenant !== b.tenantId
+          ? await resolveRetention(c, old.recording_enabled, null)
+          : old.retention_policy_id;
+
+      // 1. Retira a câmera da origem. A chave dela é substituída por uma inutilizada
+      //    (a coluna é única e a chave real vai para a câmera nova, se mantida).
+      const dead = generateStreamKey();
+      await c.query(
+        `UPDATE cameras SET deleted_at = now(), enabled = false,
+                code = code || '-T' || to_char(now(), 'YYYYMMDDHH24MISS'),
+                stream_key_hash = $2, stream_key_enc = $3, stream_key_prefix = $4
+          WHERE id = $1`,
+        [id, hashStreamKey(dead), encryptStreamKey(dead, encKey), streamKeyPrefix(dead)],
+      );
+      await transitionCamera(c, id, "disabled", "transferred");
+      await c.query("DELETE FROM user_camera_permissions WHERE camera_id = $1", [id]);
+
+      // 2. Cria no destino.
+      const code = await nextCameraCode(c, b.tenantId);
+      const { rows } = await c.query<{ id: string }>(
+        `INSERT INTO cameras (tenant_id, location_id, group_id, code, name, description, stream_key_hash,
+                              stream_key_enc, stream_key_prefix, stream_key_rotated_at, recording_enabled,
+                              retention_policy_id, ingest_node_id, storage_node_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10, $11, $12, $13) RETURNING id`,
+        [
+          b.tenantId,
+          b.locationId,
+          b.groupId ?? null,
+          code,
+          old.name,
+          old.description,
+          freshKey ? hashStreamKey(freshKey) : old.stream_key_hash,
+          freshKey ? encryptStreamKey(freshKey, encKey) : old.stream_key_enc,
+          freshKey ? streamKeyPrefix(freshKey) : old.stream_key_prefix,
+          old.recording_enabled,
+          old.recording_enabled ? retention : null,
+          old.ingest_node_id,
+          old.storage_node_id,
+        ],
+      );
+      const newId = rows[0]!.id;
+      const data = {
+        from: { tenant: old.tenant_name, code: cur.code, cameraId: id },
+        to: { tenant: t.name, code, cameraId: newId },
+        keptKey: b.keepKey,
+      };
+      await audit(c, req, "camera.transferred_out", {
+        tenantId: cur.tenantId,
+        entityType: "camera",
+        entityId: id,
+        data,
+      });
+      await audit(c, req, "camera.transferred_in", {
+        tenantId: b.tenantId,
+        entityType: "camera",
+        entityId: newId,
+        data,
+      });
+      await scheduleReconcile(c, "camera_transferred");
+      return loadCamera(c, req, newId);
+    });
+    await wakeWorker(app);
+    return reply.code(201).send({
+      camera: present(req, result),
+      ...(freshKey
+        ? { ingest: { server: serverUrl, streamKey: freshKey, url: `${serverUrl}/${freshKey}` } }
+        : {}),
+    });
   });
 }

@@ -98,6 +98,28 @@ Testes: 11 novos de integração, com servidor SMTP real de teste, e ao todo **1
 - Desmarcando o bloco, o cadastro funciona como antes: só o cliente.
 - Testes: 4 novos de integração (165/165 ao todo) e E2E 34/34.
 
+## Ajustes: usuários dentro de Clientes e transferência de câmera (30/09)
+
+**Usuários do cliente na tela Clientes**
+- Nova coluna **Usuários**, com a quantidade e uma seta. Clicando nela, os usuários daquele cliente abrem **logo abaixo** dele.
+- Cada usuário tem as mesmas ações da tela Usuários: editar, câmeras permitidas, alterar senha / enviar acesso e ativar/desativar.
+- **"Novo usuário neste cliente"** já vem com o cliente preenchido.
+- **"Abrir em Usuários"** leva à tela Usuários filtrada pelo cliente (`/usuarios?tenantId=…`).
+- Os formulários de usuário passaram para componentes compartilhados (`components/user-modals.tsx`), usados nas duas telas, sem mudança de comportamento.
+- A tabela ganhou "linha que abre" (`DataTable` → `expanded`). O conteúdo aberto só é montado na versão visível (computador ou celular), para não duplicar formulários.
+
+**Transferir câmera para outro cliente** (só a equipe da plataforma)
+- No **Editar câmera**, abaixo do campo Cliente, há o link **"Transferir para outro cliente…"**. A janela pede o cliente de destino, o local e o grupo no destino, e se a chave RTMP será **mantida** (padrão: o equipamento segue transmitindo sem reconfigurar) ou **trocada**. Também exige uma confirmação.
+- O TopCam cria a câmera no destino, com o próximo código dele, e copia nome, descrição (MAC) e gravação. A câmera antiga sai da origem.
+- **Nada do passado vai para o cliente novo.** Gravações, eventos, alertas, exportações e relatórios ficam guardados na origem, saem do painel (como numa câmera excluída) e são apagados pela retenção.
+- As permissões da câmera na origem são removidas. A auditoria registra nos dois clientes (`camera.transferred_out` / `camera.transferred_in`).
+- É uma operação só: se faltar local no destino ou o plano do destino estiver no limite, nada muda.
+- Rota: `POST /api/v1/cameras/:id/transfer`.
+
+**Mensagem do e-mail de teste:** "Enviar teste para" com algo que não é e-mail agora mostra, em português, "Informe um e-mail válido em "Enviar teste para" (ou deixe em branco para usar os destinatários salvos)".
+
+Testes: 169/169 (4 novos da transferência, mais a mensagem do e-mail de teste) e E2E 36/36 (novo `e2e/clientes-usuarios.spec.ts`).
+
 ## Pendências
 
 - Aceite na VM e configuração do Gmail (acima).

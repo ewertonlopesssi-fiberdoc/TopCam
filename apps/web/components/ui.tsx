@@ -3,6 +3,7 @@
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Loader2, X } from "lucide-react";
 import {
   Children,
+  Fragment,
   cloneElement,
   createContext,
   isValidElement,
@@ -432,19 +433,38 @@ export interface Column<T> {
 /**
  * Tabela em telas médias/grandes; lista de cartões no celular.
  */
+/** true quando a janela tem pelo menos `px` de largura (acompanha o redimensionamento). */
+function useMinWidth(px: number): boolean {
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${px}px)`);
+    const on = () => setOk(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [px]);
+  return ok;
+}
+
 export function DataTable<T>({
   rows,
   columns,
   rowKey,
   actions,
   mobileTitle,
+  expanded,
 }: {
   rows: T[];
   columns: Column<T>[];
   rowKey: (r: T) => string;
   actions?: (r: T) => React.ReactNode;
   mobileTitle: (r: T) => React.ReactNode;
+  /** Conteúdo aberto logo abaixo da linha (ex.: usuários do cliente); null = fechado. */
+  expanded?: (r: T) => React.ReactNode | null;
 }) {
+  // A tabela (computador) e os cartões (celular) ficam os dois na página; o conteúdo
+  // aberto só é montado na versão visível, para não duplicar formulários e consultas.
+  const desktop = useMinWidth(768);
   return (
     <>
       <div className="hidden overflow-x-auto md:block">
@@ -460,20 +480,32 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {rows.map((r) => (
-              <tr key={rowKey(r)} className="hover:bg-slate-50/60">
-                {columns.map((c) => (
-                  <td key={c.key} className={`td ${c.className ?? ""}`}>
-                    {c.cell(r)}
-                  </td>
-                ))}
-                {actions && (
-                  <td className="td">
-                    <div className="flex justify-end gap-1.5">{actions(r)}</div>
-                  </td>
-                )}
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const extra = desktop ? (expanded?.(r) ?? null) : null;
+              return (
+                <Fragment key={rowKey(r)}>
+                  <tr className="hover:bg-slate-50/60">
+                    {columns.map((c) => (
+                      <td key={c.key} className={`td ${c.className ?? ""}`}>
+                        {c.cell(r)}
+                      </td>
+                    ))}
+                    {actions && (
+                      <td className="td">
+                        <div className="flex justify-end gap-1.5">{actions(r)}</div>
+                      </td>
+                    )}
+                  </tr>
+                  {extra && (
+                    <tr className="bg-slate-50/70">
+                      <td colSpan={columns.length + (actions ? 1 : 0)} className="px-4 py-3">
+                        {extra}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -492,6 +524,9 @@ export function DataTable<T>({
                 ))}
             </dl>
             {actions && <div className="mt-3 flex flex-wrap gap-1.5">{actions(r)}</div>}
+            {!desktop && expanded?.(r) && (
+              <div className="mt-3 rounded-lg bg-slate-50 p-3">{expanded(r)}</div>
+            )}
           </li>
         ))}
       </ul>

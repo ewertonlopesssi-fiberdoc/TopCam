@@ -1,6 +1,17 @@
 "use client";
 
-import { Ban, Building2, CheckCircle2, Eye, Loader2, Pencil, Plus, Search } from "lucide-react";
+import {
+  Ban,
+  Building2,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   Badge,
@@ -26,6 +37,8 @@ import {
   type AccessInfo,
   type PasswordState,
 } from "@/components/password-fields";
+import { ClientUsers } from "@/components/client-users";
+import type { Role } from "@/components/user-modals";
 import { api, qs, type Page } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { TENANT_STATUS, fmtBytes, fmtDateTime, pad3 } from "@/lib/format";
@@ -285,6 +298,8 @@ export default function ClientesPage() {
   const [viewing, setViewing] = useState<Tenant | null>(null);
   const [toggling, setToggling] = useState<Tenant | null>(null);
   const [access, setAccess] = useState<AccessInfo | null>(null);
+  const [openUsers, setOpenUsers] = useState<string | null>(null);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [mailEnabled, setMailEnabled] = useState(false);
 
   const load = useCallback(async () => {
@@ -305,8 +320,8 @@ export default function ClientesPage() {
 
   useEffect(() => {
     api
-      .get<{ plans: Plan[] }>("/meta")
-      .then((m) => setPlans(m.plans))
+      .get<{ plans: Plan[]; roles: Role[] }>("/meta")
+      .then((m) => (setPlans(m.plans), setRoles(m.roles)))
       .catch(() => undefined);
     api
       .get<{ enabled: boolean }>("/users/mail-status")
@@ -334,6 +349,24 @@ export default function ClientesPage() {
     },
     { key: "plan", header: "Plano", cell: (t) => t.planName },
     { key: "cams", header: "Câmeras", cell: (t) => `${t.cameraCount} / ${t.maxCameras}` },
+    {
+      key: "users",
+      header: "Usuários",
+      cell: (t) =>
+        auth.can("users.read") ? (
+          <button
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-sm font-medium text-brand-600 hover:bg-brand-50"
+            aria-expanded={openUsers === t.id}
+            aria-label={`Usuários de ${t.name}`}
+            onClick={() => setOpenUsers(openUsers === t.id ? null : t.id)}
+          >
+            {openUsers === t.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {t.userCount}
+          </button>
+        ) : (
+          t.userCount
+        ),
+    },
     {
       key: "storage",
       header: "Armazenamento",
@@ -433,6 +466,16 @@ export default function ClientesPage() {
               rows={data.items}
               columns={columns}
               rowKey={(t) => t.id}
+              expanded={(t) =>
+                openUsers === t.id ? (
+                  <ClientUsers
+                    tenant={{ id: t.id, name: t.name }}
+                    roles={roles}
+                    mailEnabled={mailEnabled}
+                    onChanged={load}
+                  />
+                ) : null
+              }
               mobileTitle={(t) => (
                 <span>
                   <span className="mr-2 font-mono text-xs text-slate-400">{pad3(t.seq)}</span>

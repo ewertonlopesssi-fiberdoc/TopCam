@@ -156,6 +156,7 @@ function CameraForm({
   retention,
   onClose,
   onSaved,
+  onTransfer,
 }: {
   open: boolean;
   camera: Camera | null;
@@ -164,6 +165,8 @@ function CameraForm({
   retention: { id: string; name: string }[];
   onClose: () => void;
   onSaved: (ingest?: Ingest) => void;
+  /** Só para a equipe da plataforma: abre a transferência para outro cliente. */
+  onTransfer?: (camera: Camera) => void;
 }) {
   const [tenantId, setTenantId] = useState("");
   const [locationId, setLocationId] = useState("");
@@ -241,20 +244,31 @@ function CameraForm({
     >
       <ErrorBox error={error} />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Cliente *">
-          <select
-            className="input"
-            value={tenantId}
-            disabled={!!camera}
-            onChange={(e) => (setTenantId(e.target.value), setLocationId(""), setGroupId(""))}
-          >
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <div>
+          <Field label="Cliente *">
+            <select
+              className="input"
+              value={tenantId}
+              disabled={!!camera}
+              onChange={(e) => (setTenantId(e.target.value), setLocationId(""), setGroupId(""))}
+            >
+              {tenants.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {camera && onTransfer && (
+            <button
+              type="button"
+              className="mt-1 text-xs font-medium text-brand-600 hover:underline"
+              onClick={() => onTransfer(camera)}
+            >
+              Transferir para outro cliente…
+            </button>
+          )}
+        </div>
         <Field label="Nome *">
           <input
             className="input"
@@ -554,6 +568,191 @@ function CameraDrawer({
 }
 
 // ------------------------------------------------------------------ página
+// ------------------------------------------------------------------ transferência
+function TransferModal({
+  camera,
+  locations,
+  tenants,
+  onClose,
+  onDone,
+}: {
+  camera: Camera | null;
+  locations: Loc[];
+  tenants: { id: string; name: string }[];
+  onClose: () => void;
+  onDone: (moved: Camera, ingest?: Ingest) => void;
+}) {
+  const [tenantId, setTenantId] = useState("");
+  const [locationId, setLocationId] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [keepKey, setKeepKey] = useState(true);
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    if (!camera) return;
+    setTenantId("");
+    setLocationId("");
+    setGroupId("");
+    setKeepKey(true);
+    setConfirm(false);
+    setError(null);
+  }, [camera]);
+
+  const targets = tenants.filter((t) => t.id !== camera?.tenantId);
+  const locs = locations.filter((l) => l.tenantId === tenantId);
+  const groups = locs.find((l) => l.id === locationId)?.groups ?? [];
+  const targetName = tenants.find((t) => t.id === tenantId)?.name ?? "";
+
+  async function transfer() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.post<{ camera: Camera; ingest?: Ingest }>(
+        `/cameras/${camera!.id}/transfer`,
+        { tenantId, locationId, groupId: groupId || null, keepKey },
+      );
+      onDone(r.camera, r.ingest);
+      onClose();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={!!camera}
+      title={camera ? `Transferir ${camera.code} para outro cliente` : ""}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn-secondary" onClick={onClose}>
+            Cancelar
+          </button>
+          <button
+            className="btn-primary"
+            onClick={transfer}
+            disabled={busy || !tenantId || !locationId || !confirm}
+          >
+            {busy && <Loader2 size={16} className="animate-spin" />} Transferir
+          </button>
+        </>
+      }
+    >
+      <ErrorBox error={error} />
+      <div className="space-y-3" data-testid="transfer">
+        <p className="text-sm text-slate-700">
+          <b>{camera?.name}</b> sai de <b>{camera?.tenantName}</b> e passa a ser uma câmera nova no
+          cliente de destino, com o próximo código dele.
+        </p>
+        <Field label="Cliente de destino *">
+          <select
+            className="input"
+            value={tenantId}
+            onChange={(e) => (setTenantId(e.target.value), setLocationId(""), setGroupId(""))}
+          >
+            <option value="">Selecione…</option>
+            {targets.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field
+            label="Local no destino *"
+            hint={
+              tenantId && locs.length === 0
+                ? "Esse cliente não tem locais: cadastre em Grupos / Locais."
+                : undefined
+            }
+          >
+            <select
+              className="input"
+              value={locationId}
+              disabled={!tenantId}
+              onChange={(e) => (setLocationId(e.target.value), setGroupId(""))}
+            >
+              <option value="">Selecione…</option>
+              {locs.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Grupo no destino">
+            <select
+              className="input"
+              value={groupId}
+              disabled={!locationId}
+              onChange={(e) => setGroupId(e.target.value)}
+            >
+              <option value="">Sem grupo</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <fieldset className="space-y-2 rounded-lg border border-line p-3 text-sm">
+          <legend className="px-1 text-xs font-medium text-muted">Chave RTMP</legend>
+          <label className="flex items-start gap-2">
+            <input
+              type="radio"
+              name="key"
+              className="mt-0.5"
+              checked={keepKey}
+              onChange={() => setKeepKey(true)}
+            />
+            <span>
+              Manter a chave atual
+              <span className="block text-xs text-muted">
+                O mesmo equipamento continua transmitindo, sem reconfigurar.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input
+              type="radio"
+              name="key"
+              className="mt-0.5"
+              checked={!keepKey}
+              onChange={() => setKeepKey(false)}
+            />
+            <span>
+              Gerar nova chave
+              <span className="block text-xs text-muted">
+                A chave atual deixa de valer; o equipamento precisa ser reconfigurado.
+              </span>
+            </span>
+          </label>
+        </fieldset>
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          As gravações, eventos e relatórios desta câmera <b>não vão para o cliente novo</b>: ficam
+          guardados em {camera?.tenantName}, saem do painel (como numa câmera excluída) e são
+          apagados pela retenção. Os usuários de {camera?.tenantName} perdem o acesso a ela.
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={confirm}
+            onChange={(e) => setConfirm(e.target.checked)}
+          />
+          Confirmo a transferência{targetName ? ` para ${targetName}` : ""}
+        </label>
+      </div>
+    </Modal>
+  );
+}
+
 function CamerasPage() {
   const auth = useAuth();
   const toast = useToast();
@@ -575,6 +774,7 @@ function CamerasPage() {
   const [created, setCreated] = useState<Ingest | null>(null);
   const [deleting, setDeleting] = useState<Camera | null>(null);
   const [toggling, setToggling] = useState<Camera | null>(null);
+  const [transferring, setTransferring] = useState<Camera | null>(null);
 
   const [locationId, groupId] = place.startsWith("g:")
     ? ["", place.slice(2)]
@@ -886,6 +1086,20 @@ function CamerasPage() {
           void load();
           if (ingest) setCreated(ingest);
           else toast("Câmera atualizada");
+        }}
+        onTransfer={
+          auth.can("cameras.keys") ? (c) => (setFormOpen(false), setTransferring(c)) : undefined
+        }
+      />
+      <TransferModal
+        camera={transferring}
+        locations={locations}
+        tenants={tenants}
+        onClose={() => setTransferring(null)}
+        onDone={(moved, ingest) => {
+          void load();
+          toast(`Câmera transferida: agora ${moved.code} em ${moved.tenantName}`);
+          if (ingest) setCreated(ingest);
         }}
       />
       <CameraDrawer camera={viewing} onClose={() => setViewing(null)} onChanged={load} />
