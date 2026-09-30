@@ -4,7 +4,7 @@ Entregue em partes. Este documento é atualizado a cada parte.
 
 | Parte | Conteúdo | Situação |
 |---|---|---|
-| 1 | HTTPS (Let's Encrypt), RTMPS, firewall editável no painel | **implementada e testada no laboratório; aguardando aplicação na VM** |
+| 1 | HTTPS (Let's Encrypt), RTMPS, firewall editável no painel | **aprovada na VM em 30/09/2026** (RTMPS pronto, ainda desligado) |
 | 2 | Limite de requisições (rate limit) e rotação de segredos com recriptografia | a fazer |
 | 3 | Backup remoto configurável no painel (SFTP/FTPS/FTP, cifrado) | a fazer |
 | 4 | Restauração em VM limpa, testes de reinício, relatório de 7 dias, aceite | a fazer |
@@ -114,6 +114,18 @@ Estes pontos são validados no procedimento abaixo.
   - na janela 1, a resposta é lida direto do terminal e aceita `ok` em maiúsculas ou minúsculas, com ou sem espaços, além de `sim`;
   - o que foi recebido aparece na tela;
   - reverter também apaga as regras salvas.
+
+### Validação na VM (30/09/2026)
+
+| Item | Resultado |
+|---|---|
+| IP 45.237.164.6 na loopback | adicionado e gravado em `/etc/network/interfaces.d/topcam-ip-publico` |
+| DNS e porta 80 | `topcam.suportinet.com.br` → 45.237.164.6; porta 80 acessível pelo 4G |
+| HTTPS | certificado Let's Encrypt (YE1) emitido, válido até 29/12/2026; cookie seguro |
+| Painel e vídeo ao vivo por HTTPS | ok (WebRTC com domínio + 172.31.141.20) |
+| Firewall | instalado; nova sessão SSH entrou e confirmou; 4 redes aplicadas; status "ok" |
+| Timer | ativo; roda a cada 1 min |
+| Certificado do RTMPS | copiado para `.data/tls` às 12:42:57 |
 
 ### Procedimento na VM (em ordem)
 
