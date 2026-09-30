@@ -231,3 +231,23 @@ describe("transferência de câmera para outro cliente", () => {
     expect(hits[0]!.n).toBe(0);
   });
 });
+
+describe("resumo de câmeras por cliente", () => {
+  it("conta por cliente; com pesquisa só vêm clientes com resultado", async () => {
+    const all = (await api(admin).get("/api/v1/cameras/summary")).json();
+    expect(all.filtered).toBe(false);
+    const alfaRow = all.items.find((t: { tenantName: string }) => t.tenantName === "Empresa Alfa");
+    expect(alfaRow.total).toBeGreaterThanOrEqual(4);
+    expect(alfaRow.matching).toBe(alfaRow.total);
+    const q = (await api(admin).get("/api/v1/cameras/summary?search=Recep")).json();
+    expect(q.filtered).toBe(true);
+    expect(q.items.map((t: { tenantName: string }) => t.tenantName)).toEqual(["Empresa Alfa"]);
+    expect(q.items[0].matching).toBe(1);
+  });
+
+  it("cliente só enxerga o próprio resumo", async () => {
+    const t = await login("gestor@sol.test", "GestorSol12");
+    const r = (await api(t).get("/api/v1/cameras/summary")).json();
+    expect(r.items.map((x: { tenantName: string }) => x.tenantName)).toEqual(["Condomínio Sol"]);
+  });
+});

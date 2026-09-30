@@ -181,6 +181,25 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
 
 ---
 
+### 6.1 Ordem combinada após a Fase 7 (30/09/2026)
+
+1. Ajustes da Fase 7 já entregues em pacotes:
+   - senha no cadastro e envio de acesso por e-mail;
+   - cadastro de cliente com o acesso do cliente;
+   - usuários do cliente dentro de Clientes;
+   - transferência de câmera;
+   - câmeras agrupadas por cliente.
+2. **Fase 8 — Segurança, backup e resiliência** (HTTPS). Pré-requisito do SGP e do app.
+3. **Integração SGP** (Gateway Genérico). Decisões e pendências em `analise-integracao-sgp.md`; antes, capturar avisos reais de um cliente de teste.
+4. **Localização + mapa** (decidido fazer junto com o mapa, depois do SGP):
+   - latitude/longitude no **cliente** e na **câmera**;
+   - a câmera **herda do cliente**; se o técnico corrigir à mão, fica **"manual"** e não muda mais com o cliente; há a opção "voltar a usar a do cliente";
+   - câmera nova nasce com a localização do cliente;
+   - na transferência: "do cliente" pega a do destino, "manual" mantém a sua;
+   - mapa com OpenStreetMap e cor pelo status;
+   - se o SGP tiver coordenadas, a localização do cliente vem pela integração.
+5. **Compartilhamento de câmeras** (parentes e vizinhos) e **app mobile**.
+
 ## 7. Fase 1 — Fundação e ingestão RTMP autenticada (detalhe)
 
 ### 7.1 Escopo

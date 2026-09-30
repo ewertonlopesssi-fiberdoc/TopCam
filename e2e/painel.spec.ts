@@ -88,7 +88,8 @@ test.describe("fluxo do administrador e do visualizador", () => {
     await expect(created.getByTestId("stream-key")).toHaveValue(/^[A-Za-z0-9]{40}$/);
     await created.getByRole("button", { name: "Concluir" }).click();
     await page.getByPlaceholder("Pesquisar câmera…").fill(camera);
-    const camRow = page.locator("tr", { hasText: camera });
+    // Equipe da plataforma vê as câmeras agrupadas por cliente; a pesquisa já abre o cliente.
+    const camRow = page.locator("tr", { hasText: camera }).last();
     await expect(camRow.getByText("CAM-001")).toBeVisible();
     await expect(camRow.getByText("Aguardando")).toBeVisible();
 

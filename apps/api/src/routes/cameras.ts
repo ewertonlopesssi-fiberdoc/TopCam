@@ -185,6 +185,56 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
     return { ...p, items: p.items.map((r) => present(req, r)) };
   });
 
+  /**
+   * Resumo por cliente (tela Câmeras agrupada): total, no ar, gravando e offline de cada
+   * cliente, e quantas câmeras atendem aos filtros (pesquisa, status, local, grupo).
+   * Com filtros, só vêm os clientes que têm resultado.
+   */
+  app.get("/api/v1/cameras/summary", read, async (req) => {
+    const q = parseBody(listQuery.omit({ page: true, pageSize: true }), req.query);
+    const tenant = effectiveTenant(req, q.tenantId ?? null);
+    const v = visibility(req);
+    const filtered = Boolean(q.search || q.status || q.locationId || q.groupId);
+    const rows = await db(
+      app,
+      req,
+      async (c) =>
+        (
+          await c.query(
+            `SELECT t.id AS "tenantId", t.name AS "tenantName", t.status AS "tenantStatus",
+                    count(c.id)::int AS total,
+                    count(c.id) FILTER (WHERE c.status IN ('recebendo', 'validando', 'ao_vivo', 'gravando'))::int AS online,
+                    count(c.id) FILTER (WHERE c.status = 'gravando')::int AS recording,
+                    count(c.id) FILTER (WHERE c.status IN ('offline', 'erro'))::int AS offline,
+                    count(c.id) FILTER (WHERE
+                          ($2::uuid IS NULL OR c.location_id = $2)
+                      AND ($3::uuid IS NULL OR c.group_id = $3)
+                      AND ($4::text IS NULL OR c.status = $4)
+                      AND ($5::text IS NULL OR c.name ILIKE '%' || $5 || '%' OR c.code ILIKE '%' || $5 || '%')
+                    )::int AS matching
+               FROM tenants t
+               JOIN cameras c ON c.tenant_id = t.id AND c.deleted_at IS NULL
+              WHERE t.deleted_at IS NULL
+                AND ($1::uuid IS NULL OR t.id = $1)
+                AND ($6::boolean = false OR EXISTS (SELECT 1 FROM user_camera_permissions p
+                      WHERE p.camera_id = c.id AND p.user_id = $7))
+              GROUP BY t.id, t.name, t.status
+              ORDER BY t.name`,
+            [
+              tenant,
+              q.locationId ?? null,
+              q.groupId ?? null,
+              q.status ?? null,
+              q.search ?? null,
+              v.granted,
+              v.userId,
+            ],
+          )
+        ).rows as Array<{ matching: number }>,
+    );
+    return { filtered, items: filtered ? rows.filter((r) => r.matching > 0) : rows };
+  });
+
   app.get<{ Params: { id: string } }>("/api/v1/cameras/:id", read, async (req) => {
     const id = parseBody(uuid, req.params.id);
     return db(app, req, async (c) => present(req, await loadCamera(c, req, id)));

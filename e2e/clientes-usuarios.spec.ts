@@ -44,6 +44,10 @@ test.describe("clientes e câmeras", () => {
     await loginAdmin(page);
     await page.goto("/cameras");
     await page
+      .getByRole("button", { name: /^Câmeras de / })
+      .first()
+      .click();
+    await page
       .getByRole("button", { name: /^Editar / })
       .first()
       .click();
@@ -57,5 +61,33 @@ test.describe("clientes e câmeras", () => {
     await page.screenshot({ path: `reports/screens/transferir-${test.info().project.name}.png` });
     await expect(go).toBeDisabled(); // falta local e confirmação
     await dlg.getByRole("button", { name: "Cancelar" }).click();
+  });
+
+  test("câmeras agrupadas por cliente: resumo, abrir e pesquisar", async ({ page }) => {
+    await loginAdmin(page);
+    await page.goto("/cameras");
+    const alfa = page.getByRole("button", { name: "Câmeras de Empresa Alfa" });
+    await expect(alfa).toHaveAttribute("aria-expanded", "false");
+    await alfa.click();
+    const list = page.locator("[data-testid^=tenant-cameras-]");
+    await expect(list.getByText("Entrada Principal").first()).toBeVisible();
+    await page.screenshot({
+      path: `reports/screens/cameras-agrupadas-${test.info().project.name}.png`,
+    });
+    await alfa.click();
+    await expect(list).toHaveCount(0);
+    // Pesquisa: o cliente com resultado abre sozinho, com "N de M".
+    await page.getByPlaceholder("Pesquisar câmera…").fill("Recepção");
+    await expect(page.getByRole("button", { name: "Câmeras de Empresa Alfa" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    await expect(
+      page.locator("[data-testid^=tenant-cameras-]").getByRole("cell", { name: "Recepção" }),
+    ).toBeVisible();
+    // Escolhendo um cliente no filtro, volta à lista simples.
+    await page.getByLabel("Cliente", { exact: true }).selectOption({ label: "Empresa Alfa" });
+    await expect(page.locator("[data-testid^=tenant-cameras-]")).toHaveCount(0);
+    await expect(page.getByRole("cell", { name: "Recepção" })).toBeVisible();
   });
 });

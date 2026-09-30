@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  ChevronDown,
+  ChevronRight,
   Camera as CameraIcon,
   Download,
   Eye,
@@ -18,7 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Confirm,
@@ -37,7 +39,7 @@ import {
 } from "@/components/ui";
 import { api, qs, type Page } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { CAMERA_STATUS, fmtBytes, fmtDateTime, fmtRelative } from "@/lib/format";
+import { CAMERA_STATUS, TENANT_STATUS, fmtBytes, fmtDateTime, fmtRelative } from "@/lib/format";
 
 interface Camera {
   id: string;
@@ -568,6 +570,68 @@ function CameraDrawer({
 }
 
 // ------------------------------------------------------------------ página
+interface TenantSummary {
+  tenantId: string;
+  tenantName: string;
+  tenantStatus: string;
+  total: number;
+  online: number;
+  recording: number;
+  offline: number;
+  matching: number;
+}
+
+/** Câmeras de um cliente, abertas abaixo da linha dele (tela Câmeras agrupada). */
+function TenantCameras({
+  tenantId,
+  query,
+  refreshKey,
+  render,
+  onAll,
+}: {
+  tenantId: string;
+  query: { search: string; locationId: string; groupId: string; status: string };
+  refreshKey: number;
+  render: (rows: Camera[]) => React.ReactNode;
+  onAll: () => void;
+}) {
+  const [data, setData] = useState<Page<Camera> | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const { search, locationId, groupId, status } = query;
+  useEffect(() => {
+    let stop = false;
+    api
+      .get<Page<Camera>>(
+        `/cameras${qs({ tenantId, search, locationId, groupId, status, pageSize: 100 })}`,
+      )
+      .then((r) => !stop && (setData(r), setError(null)))
+      .catch((err) => !stop && setError(err));
+    return () => {
+      stop = true;
+    };
+  }, [tenantId, search, locationId, groupId, status, refreshKey]);
+  if (error) return <ErrorBox error={error} />;
+  if (!data)
+    return (
+      <div className="flex items-center gap-2 py-2 text-sm text-muted">
+        <Loader2 size={16} className="animate-spin" /> Carregando…
+      </div>
+    );
+  return (
+    <div className="-mx-4 -my-3 bg-white" data-testid={`tenant-cameras-${tenantId}`}>
+      {render(data.items)}
+      {data.total > data.items.length && (
+        <div className="border-t border-line px-4 py-2 text-xs">
+          Mostrando {data.items.length} de {data.total}.{" "}
+          <button className="font-medium text-brand-600 hover:underline" onClick={onAll}>
+            Ver todas deste cliente
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ transferência
 function TransferModal({
   camera,
@@ -775,6 +839,14 @@ function CamerasPage() {
   const [deleting, setDeleting] = useState<Camera | null>(null);
   const [toggling, setToggling] = useState<Camera | null>(null);
   const [transferring, setTransferring] = useState<Camera | null>(null);
+  // Equipe da plataforma sem cliente escolhido: câmeras agrupadas por cliente.
+  const grouped = auth.isPlatform && !tenantId;
+  const [summary, setSummary] = useState<{ filtered: boolean; items: TenantSummary[] } | null>(
+    null,
+  );
+  const [openTenants, setOpenTenants] = useState<Set<string>>(new Set());
+  const [refreshKey, setRefreshKey] = useState(0);
+  const appliedFilter = useRef<string | null>(null);
 
   const [locationId, groupId] = place.startsWith("g:")
     ? ["", place.slice(2)]
@@ -783,15 +855,29 @@ function CamerasPage() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      setData(
-        await api.get<Page<Camera>>(
-          `/cameras${qs({ search, tenantId, locationId, groupId, status, page, pageSize: 10 })}`,
-        ),
-      );
+      if (grouped) {
+        const r = await api.get<{ filtered: boolean; items: TenantSummary[] }>(
+          `/cameras/summary${qs({ search, locationId, groupId, status })}`,
+        );
+        setSummary(r);
+        setRefreshKey((k) => k + 1);
+        // Pesquisa ou filtro novo: os clientes com resultado já abrem; sem filtro, fechados.
+        const key = `${search}|${locationId}|${groupId}|${status}`;
+        if (appliedFilter.current !== key) {
+          appliedFilter.current = key;
+          setOpenTenants(r.filtered ? new Set(r.items.map((t) => t.tenantId)) : new Set<string>());
+        }
+      } else {
+        setData(
+          await api.get<Page<Camera>>(
+            `/cameras${qs({ search, tenantId, locationId, groupId, status, page, pageSize: 10 })}`,
+          ),
+        );
+      }
     } catch (err) {
       setError(err);
     }
-  }, [search, tenantId, locationId, groupId, status, page]);
+  }, [grouped, search, tenantId, locationId, groupId, status, page]);
 
   useEffect(() => {
     const t = setTimeout(load, 250);
@@ -825,8 +911,16 @@ function CamerasPage() {
     [locations, tenantId],
   );
 
-  function exportCsv() {
-    if (!data) return;
+  async function exportCsv() {
+    // Exporta todas as câmeras que atendem aos filtros (não só a página na tela).
+    const all: Camera[] = [];
+    for (let p = 1; ; p++) {
+      const r = await api.get<Page<Camera>>(
+        `/cameras${qs({ search, tenantId, locationId, groupId, status, page: p, pageSize: 100 })}`,
+      );
+      all.push(...r.items);
+      if (p >= r.pages) break;
+    }
     const head = [
       "Código",
       "Nome",
@@ -840,7 +934,7 @@ function CamerasPage() {
       "Status",
       "Último vídeo",
     ];
-    const lines = data.items.map((c) =>
+    const lines = all.map((c) =>
       [
         c.code,
         c.name,
@@ -904,6 +998,127 @@ function CamerasPage() {
     },
   ];
 
+  const actions = (c: Camera) => (
+    <>
+      {c.enabled && (
+        <Link
+          className="icon-btn"
+          title="Ao vivo"
+          aria-label={`Ao vivo ${c.code}`}
+          href={`/ao-vivo?camera=${c.id}`}
+        >
+          <MonitorPlay size={16} />
+        </Link>
+      )}
+      <button
+        className="icon-btn"
+        title="Detalhes"
+        aria-label={`Detalhes de ${c.code}`}
+        onClick={() => setViewing(c)}
+      >
+        <Eye size={16} />
+      </button>
+      {canWrite && (
+        <>
+          <button
+            className="icon-btn"
+            title="Editar"
+            aria-label={`Editar ${c.code}`}
+            onClick={() => (setEditing(c), setFormOpen(true))}
+          >
+            <Pencil size={16} />
+          </button>
+          <button
+            className="icon-btn"
+            title={c.enabled ? "Desativar" : "Ativar"}
+            aria-label={`${c.enabled ? "Desativar" : "Ativar"} ${c.code}`}
+            onClick={() => setToggling(c)}
+          >
+            <Power size={16} className={c.enabled ? "" : "text-red-500"} />
+          </button>
+          <button
+            className="icon-btn hover:!text-red-600"
+            title="Excluir"
+            aria-label={`Excluir ${c.code}`}
+            onClick={() => setDeleting(c)}
+          >
+            <Trash2 size={16} />
+          </button>
+        </>
+      )}
+    </>
+  );
+
+  const cameraTable = (rows: Camera[], cols: Column<Camera>[]) => (
+    <DataTable
+      rows={rows}
+      columns={cols}
+      rowKey={(c) => c.id}
+      mobileTitle={(c) => (
+        <span>
+          <span className="mr-2 font-mono text-xs text-slate-500">{c.code}</span>
+          {c.name}
+        </span>
+      )}
+      actions={actions}
+    />
+  );
+
+  const toggleTenant = (id: string) =>
+    setOpenTenants((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const summaryColumns: Column<TenantSummary>[] = [
+    {
+      key: "tenant",
+      header: "Cliente",
+      cell: (t) => (
+        <button
+          className="inline-flex items-center gap-1.5 text-left font-medium hover:text-brand-600"
+          aria-expanded={openTenants.has(t.tenantId)}
+          aria-label={`Câmeras de ${t.tenantName}`}
+          onClick={() => toggleTenant(t.tenantId)}
+        >
+          {openTenants.has(t.tenantId) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          {t.tenantName}
+          {t.tenantStatus !== "active" && (
+            <span className="text-xs font-normal text-muted">
+              ({TENANT_STATUS[t.tenantStatus]?.label ?? t.tenantStatus})
+            </span>
+          )}
+        </button>
+      ),
+    },
+    {
+      key: "total",
+      header: "Câmeras",
+      cell: (t) =>
+        summary?.filtered && t.matching !== t.total ? `${t.matching} de ${t.total}` : t.total,
+    },
+    {
+      key: "online",
+      header: "No ar",
+      cell: (t) => <span className="text-green-700">{t.online}</span>,
+    },
+    { key: "recording", header: "Gravando", cell: (t) => t.recording },
+    {
+      key: "offline",
+      header: "Offline",
+      cell: (t) =>
+        t.offline > 0 ? (
+          <Badge tone="red" dot>
+            {t.offline}
+          </Badge>
+        ) : (
+          <span className="text-muted">0</span>
+        ),
+    },
+  ];
+
   return (
     <>
       <PageHeader
@@ -911,7 +1126,11 @@ function CamerasPage() {
         subtitle="Gerencie as câmeras cadastradas no sistema."
         actions={
           <>
-            <button className="btn-secondary" onClick={exportCsv} disabled={!data?.items.length}>
+            <button
+              className="btn-secondary"
+              onClick={() => void exportCsv().catch(setError)}
+              disabled={grouped ? !summary?.items.length : !data?.items.length}
+            >
               <Download size={16} /> Exportar
             </button>
             {canWrite && (
@@ -989,7 +1208,44 @@ function CamerasPage() {
             </select>
           </div>
         </div>
-        {!data ? (
+        {grouped ? (
+          !summary ? (
+            <Loading />
+          ) : summary.items.length === 0 ? (
+            <Empty
+              icon={<CameraIcon size={40} />}
+              title="Nenhuma câmera encontrada"
+              text={
+                canWrite
+                  ? "Ajuste os filtros ou cadastre uma nova câmera."
+                  : "Nenhuma câmera foi liberada para você ainda."
+              }
+            />
+          ) : (
+            <DataTable
+              rows={summary.items}
+              columns={summaryColumns}
+              rowKey={(t) => t.tenantId}
+              mobileTitle={(t) => t.tenantName}
+              expanded={(t) =>
+                openTenants.has(t.tenantId) ? (
+                  <TenantCameras
+                    tenantId={t.tenantId}
+                    query={{ search, locationId, groupId, status }}
+                    refreshKey={refreshKey}
+                    render={(rows) =>
+                      cameraTable(
+                        rows,
+                        columns.filter((c) => c.key !== "tenant"),
+                      )
+                    }
+                    onAll={() => (setTenantId(t.tenantId), setPage(1))}
+                  />
+                ) : null
+              }
+            />
+          )
+        ) : !data ? (
           <Loading />
         ) : data.items.length === 0 ? (
           <Empty
@@ -1003,67 +1259,7 @@ function CamerasPage() {
           />
         ) : (
           <>
-            <DataTable
-              rows={data.items}
-              columns={columns}
-              rowKey={(c) => c.id}
-              mobileTitle={(c) => (
-                <span>
-                  <span className="mr-2 font-mono text-xs text-slate-500">{c.code}</span>
-                  {c.name}
-                </span>
-              )}
-              actions={(c) => (
-                <>
-                  {c.enabled && (
-                    <Link
-                      className="icon-btn"
-                      title="Ao vivo"
-                      aria-label={`Ao vivo ${c.code}`}
-                      href={`/ao-vivo?camera=${c.id}`}
-                    >
-                      <MonitorPlay size={16} />
-                    </Link>
-                  )}
-                  <button
-                    className="icon-btn"
-                    title="Detalhes"
-                    aria-label={`Detalhes de ${c.code}`}
-                    onClick={() => setViewing(c)}
-                  >
-                    <Eye size={16} />
-                  </button>
-                  {canWrite && (
-                    <>
-                      <button
-                        className="icon-btn"
-                        title="Editar"
-                        aria-label={`Editar ${c.code}`}
-                        onClick={() => (setEditing(c), setFormOpen(true))}
-                      >
-                        <Pencil size={16} />
-                      </button>
-                      <button
-                        className="icon-btn"
-                        title={c.enabled ? "Desativar" : "Ativar"}
-                        aria-label={`${c.enabled ? "Desativar" : "Ativar"} ${c.code}`}
-                        onClick={() => setToggling(c)}
-                      >
-                        <Power size={16} className={c.enabled ? "" : "text-red-500"} />
-                      </button>
-                      <button
-                        className="icon-btn hover:!text-red-600"
-                        title="Excluir"
-                        aria-label={`Excluir ${c.code}`}
-                        onClick={() => setDeleting(c)}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </>
-                  )}
-                </>
-              )}
-            />
+            {cameraTable(data.items, columns)}
             <Pagination
               page={data.page}
               pages={data.pages}

@@ -120,6 +120,18 @@ Testes: 11 novos de integração, com servidor SMTP real de teste, e ao todo **1
 
 Testes: 169/169 (4 novos da transferência, mais a mensagem do e-mail de teste) e E2E 36/36 (novo `e2e/clientes-usuarios.spec.ts`).
 
+## Ajuste: câmeras agrupadas por cliente (30/09)
+
+- Para a equipe da plataforma, a tela **Câmeras** mostra **uma linha por cliente**, com o total de câmeras e quantas estão **no ar**, **gravando** e **offline** (em vermelho quando há alguma).
+- Clicando no cliente, as câmeras dele **abrem logo abaixo**, com as mesmas colunas e ações de antes.
+- **Pesquisa e filtros:** os clientes com resultado já abrem sozinhos, e a contagem aparece como "N de M".
+- **Escolhendo um cliente no filtro**, a tela volta à lista simples, com paginação.
+- Usuários de cliente continuam vendo a lista simples.
+- **Exportar** agora baixa todas as câmeras que atendem aos filtros, não só a página visível na tela.
+- Rota nova: `GET /api/v1/cameras/summary` (contagens por cliente, respeitando isolamento e permissões).
+- Testes: 171/171 (2 novos do resumo) e E2E 37/37.
+- **Localização + mapa** ficou registrada no plano (seção 6.1) como etapa futura, com as regras definidas.
+
 ## Pendências
 
 - Aceite na VM e configuração do Gmail (acima).
