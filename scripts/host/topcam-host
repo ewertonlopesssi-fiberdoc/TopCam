@@ -114,9 +114,11 @@ load_conf() {
   . "$CONF"
   [ -n "${TOPCAM_DIR:-}" ] || die "TOPCAM_DIR ausente em $CONF"
 }
+# stdin de /dev/null: rodando num terminal, o "timeout" deixa o docker compose fora do
+# primeiro plano e ele fica parado esperando o teclado (travava o install e o status).
 psqlq() {
   (cd "$TOPCAM_DIR" && timeout 20 docker compose exec -T postgres \
-    psql -U topcam_owner -d topcam -v ON_ERROR_STOP=1 -Atq -c "$1") 2>/dev/null
+    psql -U topcam_owner -d topcam -v ON_ERROR_STOP=1 -Atq -c "$1") </dev/null 2>/dev/null
 }
 write_status() { # write_status <json>
   local j="${1//\'/\'\'}"
@@ -190,9 +192,9 @@ tls_sync() {
   [[ -n "$site" && "$site" != :* && "$site" != http://* ]] || return 0   # sem HTTPS: nada a fazer
   local dir="$TOPCAM_DIR/.data/tls" crt key
   crt=$(cd "$TOPCAM_DIR" && docker compose exec -T gateway sh -c \
-    "cat /data/caddy/certificates/*/$site/$site.crt" 2>/dev/null) || return 0
+    "cat /data/caddy/certificates/*/$site/$site.crt" </dev/null 2>/dev/null) || return 0
   key=$(cd "$TOPCAM_DIR" && docker compose exec -T gateway sh -c \
-    "cat /data/caddy/certificates/*/$site/$site.key" 2>/dev/null) || return 0
+    "cat /data/caddy/certificates/*/$site/$site.key" </dev/null 2>/dev/null) || return 0
   [ -n "$crt" ] && [ -n "$key" ] || return 0
   mkdir -p "$dir"
   if [ "$crt" = "$(cat "$dir/server.crt" 2>/dev/null)" ]; then
@@ -304,7 +306,10 @@ EOF
     rm -f "$STATE/firewall.hash"
     die "sem confirmação: firewall desfeito. Nada ficou bloqueado."
   fi
-  systemctl enable --now topcam-host.timer >/dev/null
+  if ! systemctl enable --now topcam-host.timer >/dev/null 2>&1; then
+    log "ATENÇÃO: firewall aplicado, mas o timer não ligou. Veja: systemctl status topcam-host.timer"
+    exit 1
+  fi
   log "instalado: o firewall segue a lista do painel (Configurações → Firewall), conferida a cada minuto"
 }
 

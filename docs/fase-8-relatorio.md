@@ -101,6 +101,14 @@ Entregue em partes. Este documento é atualizado a cada parte.
 
 Estes pontos são validados no procedimento abaixo.
 
+### Correção após a primeira tentativa na VM
+
+- **Sintoma:** o `topcam-host install` e o `topcam-host status` travavam num terminal SSH, logo após "redes da instalação". Nada era aplicado.
+- **Causa:** o `timeout` tira o `docker compose exec` do primeiro plano do terminal, e ele fica parado esperando o teclado. No teste automatizado não havia terminal.
+- **Correção:** as consultas agora recebem a entrada de `/dev/null`.
+- **Reteste com terminal simulado:** install completo, status e confirmação `OK`.
+- **Timer:** se ele não ligar, o install agora avisa em vez de ficar calado.
+
 ### Procedimento na VM (em ordem)
 
 1. **Atualizar** com o bundle, como sempre (`scripts/update.sh --bundle …`). A migração 0008 roda sozinha, e o painel continua em HTTP.
