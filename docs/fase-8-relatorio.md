@@ -7,7 +7,7 @@ Entregue em partes. Este documento é atualizado a cada parte.
 | 1 | HTTPS (Let's Encrypt), RTMPS, firewall editável no painel | **aprovada na VM em 30/09/2026** (RTMPS pronto, ainda desligado) |
 | 2 | Limite de requisições (rate limit) e rotação de segredos com recriptografia | **implementada e testada no laboratório; aguardando aplicação na VM** |
 | 3 | Backup remoto configurável no painel (SFTP/FTPS/FTP, cifrado) e restauração | **implementada e testada no laboratório; aguardando aplicação na VM e o destino real** |
-| 4 | Restauração em VM limpa, testes de reinício, relatório de 7 dias, aceite | a fazer |
+| 4 | Restauração em VM limpa, testes de reinício, disco cheio, relatório de 7 dias, aceite | **roteiros prontos e testados no laboratório; execução na VM de teste e na produção pendente** |
 
 ---
 
@@ -407,3 +407,78 @@ Pedido depois da primeira entrega da parte 3.
    ```
 6. Ligar "Backup automático diário".
 7. O teste de restauração numa VM limpa fica na parte 4.
+
+---
+
+## Parte 4 — Aceite, reinícios, disco cheio e teste contínuo
+
+A parte 4 não mexe no código do sistema: são roteiros de teste e de relatório. O passo a passo está em `docs/procedimento-fase8-testes.md`.
+
+### Scripts
+
+**`scripts/accept-phase8.sh` — aceite da Fase 8**
+
+| Item | O que confere |
+|---|---|
+| H1 | HTTPS: certificado, dias até vencer, redirecionamento, HSTS, cookie seguro |
+| H2 | RTMPS, se ligado |
+| F1 | firewall ativo e igual ao painel |
+| L1 | IP de teste errando chaves: bloqueio, evento e alerta (limpa no fim) |
+| S1 | chaves legíveis e `.env` 600 |
+| B1 | serviço de backup ativo, automático ligado, último concluído há menos de 26 h; com `--passphrase-file`, o arquivo abre |
+| R1 | reinício de cada contêiner (redis, postgres, api, worker, backup, web, gateway, mediamtx): tudo volta saudável, a gravação da CAM-001 de teste continua, os segmentos já concluídos ficam idênticos e nenhum arquivo gravado fica fora do índice |
+| M1 | lint e testes |
+
+**Reinício da VM:** `--before-reboot` guarda a foto do estado; `--after-reboot` confere:
+
+| Item | O que confere |
+|---|---|
+| V1 | houve reinício |
+| V2 | serviços voltaram sozinhos |
+| V3 | firewall restaurado |
+| V4 | IP público na VM e painel respondendo |
+| V5 | câmeras que gravavam voltaram a gravar, com segmento novo |
+| V6 | índice idêntico, sem segmentos faltando ou corrompidos |
+
+**`scripts/test-disk-full.sh --vm-de-teste`** — só em VM de teste. Recusa painel com domínio e pede confirmação.
+
+| Item | O que confere |
+|---|---|
+| D1 | a 90%, alerta aberto |
+| D2 | a 100% por 3 min (informativo) |
+| D3 | liberado o espaço, tudo volta sozinho: banco gravando, gravação continua, nada fora do índice, `pg_amcheck` |
+| D4 | o alerta fecha sozinho |
+
+**`scripts/report-7days.sh`** — relatório do teste contínuo (`--since` ou `--days`):
+
+- serviços e reinícios;
+- disponibilidade por câmera;
+- cobertura e lacunas da gravação (inclui segmentos já apagados pela retenção);
+- alertas e eventos;
+- backups;
+- disco de vídeo por nó;
+- CPU, memória e E/S travada pelo Prometheus;
+- pontos de atenção.
+
+### Testes no laboratório
+
+| Teste | Resultado |
+|---|---|
+| Aceite | L1, S1, B1 e **R1 aprovados**. R1: 8 contêineres reiniciados, cada um de volta em 5–16 s; segmento novo conferido; 13 segmentos anteriores idênticos; 7 arquivos gravados no teste, 0 fora do índice |
+| H1/H2 | pulados (laboratório em HTTP) |
+| F1 | falha esperada: o laboratório não tem o serviço do host (systemd) |
+| Reinício da VM | antes/depois exercitados sem reinício real: V1 acusou corretamente "não houve reinício"; V2 e V6 aprovados |
+| Relatório de 7 dias | gerado com dados reais do laboratório (1 dia) |
+| Disco cheio | **não executado aqui**: o disco do laboratório é compartilhado. Roda na VM de teste |
+
+Três defeitos encontrados e corrigidos nos próprios roteiros:
+
+- o `find` do worker (BusyBox) não aceita `-newermt`, então passou a usar `-mmin`;
+- os caminhos no índice são relativos (`cam/<id>/…`);
+- a foto do índice incluía o segmento em gravação, que muda ao terminar, e passou a comparar só os já concluídos.
+
+Também observado no laboratório: com o disco real acima de 95%, a gravação para mesmo com cota, que é a proteção da Fase 6 funcionando como previsto.
+
+### Validação informal na VM (30/09)
+
+Na mudança da VM 107 para o HD18-TB (desligada, com os dois discos movidos), ela voltou sozinha: os 10 serviços saudáveis, o firewall reaplicado (timer ativo, `"ok": true`) e o IP 45.237.164.6 na loopback.

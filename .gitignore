@@ -8,6 +8,7 @@ dist/
 .data/
 reports/*.md
 reports/*.log
+reports/.aceite8-*
 !reports/.gitkeep
 coverage/
 dump.rdb
