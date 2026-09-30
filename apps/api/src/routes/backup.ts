@@ -1,18 +1,24 @@
-import { PLATFORM, withScope } from "@topcam/db";
+import { randomBytes } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { PLATFORM, insertAudit, withScope } from "@topcam/db";
 import {
   BACKUP_DEFAULT_PORT,
+  BACKUP_FILE_RE,
   BACKUP_PASSPHRASE_MIN,
   BACKUP_PATH_RE,
   encryptSecret,
   mergeBackupSettings,
   nextScheduledSlot,
   parseEncryptionKey,
+  verifyPassword,
   type BackupSettings,
 } from "@topcam/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { audit } from "../lib/audit.js";
-import { badRequest, conflict, parseBody } from "../lib/http.js";
+import { HttpError, badRequest, conflict, notFound, parseBody } from "../lib/http.js";
 
 /**
  * Backup (Fase 8, parte 3) — só o Super Admin (settings.write).
@@ -22,6 +28,9 @@ import { badRequest, conflict, parseBody } from "../lib/http.js";
  *  POST /api/v1/backup/test                pede um teste de conexão ao serviço de backup
  *  POST /api/v1/backup/run                 pede um backup agora
  *  POST /api/v1/backup/accept-host-key     esquece a identidade SFTP registrada (servidor trocado)
+ *  POST /api/v1/backup/download            { runId, password } → link de uso único (60 s)
+ *  GET  /api/v1/backup/download/:token     baixa o arquivo cifrado (sem cabeçalho de login:
+ *                                          o próprio link é a autorização, e vale uma vez)
  *
  * Quem executa é o serviço "backup" (contêiner próprio). A API só grava pedidos em backup_runs.
  */
@@ -50,6 +59,8 @@ export function privateKeyHasPassphrase(pem: string): boolean {
 const body = z
   .object({
     enabled: z.boolean(),
+    /** Sem destino externo: o arquivo fica só no servidor e é baixado pelo painel. */
+    localOnly: z.boolean().default(false),
     protocol: z.enum(["sftp", "ftps", "ftp"]),
     host: z.string().trim().max(253),
     port: z.number().int().min(1).max(65535).optional(),
@@ -68,6 +79,10 @@ const body = z
   })
   .strict();
 
+/** Link de download: uso único, curto. */
+const DOWNLOAD_TTL_S = 60;
+const dlKey = (t: string) => `topcam:backup-dl:${t}`;
+
 /** Serviço sem sinal de vida há mais que isto → "parado". */
 const SERVICE_STALE_MS = 2 * 60_000;
 
@@ -78,6 +93,15 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
   const limited = {
     preHandler: [app.requirePermission("settings.write"), app.rateLimit("backup-request", 10, 600)],
   };
+
+  /** Backups que ainda estão no servidor (os únicos que dá para baixar). */
+  async function localFiles(): Promise<string[]> {
+    try {
+      return (await readdir(env.BACKUP_DIR)).filter((n) => BACKUP_FILE_RE.test(n));
+    } catch {
+      return [];
+    }
+  }
 
   async function load(): Promise<BackupSettings> {
     const row = await withScope(
@@ -97,7 +121,7 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
     const s = await load();
     return withScope(pool, PLATFORM, async (c) => {
       const runs = (
-        await c.query(
+        await c.query<{ kind: string; status: string; fileName: string | null }>(
           `SELECT r.id::text, r.kind, r.trigger, r.status, r.created_at AS "createdAt",
                   r.started_at AS "startedAt", r.finished_at AS "finishedAt", r.file_name AS "fileName",
                   r.size_bytes::float8 AS "sizeBytes", r.destination, r.message, r.error, r.details,
@@ -117,9 +141,11 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
         )
       ).rows[0]!.at;
       const alive = !!beat?.at && Date.now() - Date.parse(beat.at) < SERVICE_STALE_MS;
+      const local = new Set(await localFiles());
       return {
         settings: {
           enabled: s.enabled,
+          localOnly: s.local_only,
           protocol: s.protocol,
           host: s.host,
           port: s.port,
@@ -138,7 +164,11 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
         service: { alive, lastSeenAt: beat?.at ?? null, busy: Boolean(beat?.busy) },
         nextRunAt: s.enabled ? nextScheduledSlot(new Date(), s.schedule_time).toISOString() : null,
         lastSuccessAt: lastSuccess,
-        runs,
+        runs: runs.map((r) => ({
+          ...r,
+          downloadable:
+            r.kind === "backup" && r.status === "success" && !!r.fileName && local.has(r.fileName),
+        })),
       };
     });
   });
@@ -146,6 +176,8 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
   app.put("/api/v1/backup/settings", admin, async (req) => {
     const b = parseBody(body, req.body);
     const cur = await load();
+    if (b.localOnly && b.retentionLocal < 1)
+      throw badRequest("Sem destino externo, guarde ao menos 1 cópia no servidor");
     if (b.host && !HOST_RE.test(b.host))
       throw badRequest("Servidor inválido: use o nome ou o IP (IPv4)");
     if (b.username && !USER_RE.test(b.username))
@@ -178,6 +210,7 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
     const endpointChanged = cur.host !== b.host || cur.port !== port || cur.protocol !== b.protocol;
     const next: BackupSettings = {
       enabled: b.enabled,
+      local_only: b.localOnly,
       protocol: b.protocol,
       host: b.host,
       port,
@@ -197,16 +230,16 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
         b.passphrase === undefined ? cur.passphrase_enc : encryptSecret(b.passphrase, encKey),
       enabled_at: b.enabled ? (cur.enabled ? cur.enabled_at : new Date().toISOString()) : null,
     };
-    if (next.enabled) {
+    if (next.enabled && !next.local_only) {
       if (!next.host) throw badRequest("Informe o servidor de destino");
       if (!next.username) throw badRequest("Informe o usuário do destino");
       if (auth === "key" ? !next.private_key_enc : !next.password_enc)
         throw badRequest(
           auth === "key" ? "Cole a chave SSH privada" : "Informe a senha do destino",
         );
-      if (!next.passphrase_enc)
-        throw badRequest("Defina a senha do backup (guarde-a fora do servidor)");
     }
+    if (next.enabled && !next.passphrase_enc)
+      throw badRequest("Defina a senha do backup (guarde-a fora do servidor)");
 
     await withScope(pool, PLATFORM, async (c) => {
       await c.query(
@@ -221,6 +254,7 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
         entityId: "backup",
         data: {
           enabled: next.enabled,
+          localOnly: next.local_only,
           protocol: next.protocol,
           host: next.host,
           port: next.port,
@@ -269,13 +303,16 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/api/v1/backup/test", limited, async (req, reply) => {
     const s = await load();
+    if (s.local_only)
+      throw badRequest('Backup "somente no servidor": não há destino externo para testar');
     if (!s.host || !s.username) throw badRequest("Salve o destino antes de testar");
     return reply.code(202).send(await request("test", req.user!.id, req));
   });
 
   app.post("/api/v1/backup/run", limited, async (req, reply) => {
     const s = await load();
-    if (!s.host || !s.username) throw badRequest("Salve o destino antes de fazer o backup");
+    if (!s.local_only && (!s.host || !s.username))
+      throw badRequest("Salve o destino antes de fazer o backup");
     if (!s.passphrase_enc) throw badRequest("Defina a senha do backup antes");
     return reply.code(202).send(await request("backup", req.user!.id, req));
   });
@@ -293,5 +330,87 @@ export async function backupRoutes(app: FastifyInstance): Promise<void> {
       });
     });
     return { ok: true };
+  });
+
+  // ------------------------------------------------------------------ download
+  const downloadBody = z
+    .object({ runId: z.string().regex(/^\d+$/), password: z.string().max(200) })
+    .strict();
+  const downloadLimit = {
+    preHandler: [
+      app.requirePermission("settings.write"),
+      app.rateLimit("backup-download", 10, 600),
+    ],
+  };
+
+  app.post("/api/v1/backup/download", downloadLimit, async (req) => {
+    const b = parseBody(downloadBody, req.body);
+    const user = req.user!;
+    const run = await withScope(pool, PLATFORM, async (c) => {
+      const hash = (
+        await c.query<{ password_hash: string | null }>(
+          "SELECT password_hash FROM users WHERE id = $1",
+          [user.id],
+        )
+      ).rows[0]?.password_hash;
+      if (!hash || !(await verifyPassword(b.password, hash)))
+        throw new HttpError(400, "wrong_password", "Senha incorreta");
+      return (
+        await c.query<{ file_name: string | null; kind: string; status: string }>(
+          "SELECT file_name, kind, status FROM backup_runs WHERE id = $1",
+          [b.runId],
+        )
+      ).rows[0];
+    });
+    if (!run || run.kind !== "backup" || run.status !== "success" || !run.file_name)
+      throw notFound("Backup não encontrado");
+    const file = run.file_name;
+    if (!BACKUP_FILE_RE.test(file) || !(await localFiles()).includes(file))
+      throw notFound(
+        "Este backup não está mais no servidor (só as cópias mais recentes ficam guardadas)",
+      );
+    const token = randomBytes(32).toString("base64url");
+    await app.deps.redis.set(
+      dlKey(token),
+      JSON.stringify({ file, userId: user.id, runId: b.runId }),
+      "EX",
+      DOWNLOAD_TTL_S,
+    );
+    return { url: `/api/v1/backup/download/${token}`, fileName: file, expiresInS: DOWNLOAD_TTL_S };
+  });
+
+  app.get<{ Params: { token: string } }>("/api/v1/backup/download/:token", async (req, reply) => {
+    const token = req.params.token;
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw notFound("Link inválido ou expirado");
+    const raw = await app.deps.redis.getdel(dlKey(token));
+    if (!raw) throw notFound("Link inválido ou expirado. Peça o download de novo pelo painel.");
+    const { file, userId, runId } = JSON.parse(raw) as {
+      file: string;
+      userId: string;
+      runId: string;
+    };
+    if (!BACKUP_FILE_RE.test(file)) throw notFound("Link inválido ou expirado");
+    const path = join(env.BACKUP_DIR, file);
+    const info = await stat(path).catch(() => null);
+    if (!info) throw notFound("Este backup não está mais no servidor");
+    await withScope(pool, PLATFORM, (c) =>
+      insertAudit(c, {
+        tenantId: null,
+        actorType: "user",
+        actorUserId: userId,
+        action: "backup.downloaded",
+        entityType: "backup_run",
+        entityId: runId,
+        data: { file, size: info.size },
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] ?? null,
+      }),
+    );
+    return reply
+      .header("Content-Type", "application/octet-stream")
+      .header("Content-Disposition", `attachment; filename="${file}"`)
+      .header("Content-Length", String(info.size))
+      .header("Cache-Control", "no-store")
+      .send(createReadStream(path));
   });
 }

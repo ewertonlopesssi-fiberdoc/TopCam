@@ -62,6 +62,7 @@ export async function loadSettings(pool: Pool): Promise<BackupSettings> {
 }
 
 function configured(s: BackupSettings): string | null {
+  if (s.local_only) return null;
   if (!s.host) return "Informe o servidor de destino";
   if (!s.username) return "Informe o usuário do destino";
   if (s.auth === "key" ? !s.private_key_enc : !s.password_enc)
@@ -84,7 +85,8 @@ function destination(ctx: BackupContext, s: BackupSettings): Destination {
   };
 }
 
-const describeDest = (s: BackupSettings) => `${s.protocol}://${s.host}:${s.port}/${s.path}`;
+const describeDest = (s: BackupSettings) =>
+  s.local_only ? "somente no servidor" : `${s.protocol}://${s.host}:${s.port}/${s.path}`;
 
 async function saveHostKey(ctx: BackupContext, lines: string, fingerprint: string) {
   await withScope(ctx.pool, PLATFORM, (c) =>
@@ -162,6 +164,10 @@ async function finish(
 // ------------------------------------------------------------------ teste de conexão
 async function runTest(ctx: BackupContext, run: RunRow) {
   const s = await loadSettings(ctx.pool);
+  if (s.local_only)
+    return finish(ctx, run.id, "failed", {
+      error: 'Backup configurado como "somente no servidor": não há destino externo para testar',
+    });
   const missing = configured(s);
   if (missing) return finish(ctx, run.id, "failed", { error: missing });
   const tmp = await privateDir("topcam-probe-");
@@ -221,7 +227,34 @@ async function runBackup(ctx: BackupContext, run: RunRow) {
     return fail(ctx, run, s, (err as Error).message);
   }
   const name = archive.file.split("/").at(-1)!;
-  const removedLocal = await pruneLocal(ctx.backupDir, s.retention_local);
+
+  if (s.local_only) {
+    // Sem destino externo: guarda no servidor (mínimo 1 cópia) para baixar pelo painel.
+    const removedLocal = await pruneLocal(ctx.backupDir, Math.max(1, s.retention_local));
+    const secs = Math.round((Date.now() - started) / 1000);
+    await finish(ctx, run.id, "success", {
+      file_name: name,
+      size_bytes: archive.size,
+      destination: describeDest(s),
+      message: `Backup salvo no servidor em ${secs} s (sem destino externo; baixe pelo painel)`,
+      details: {
+        duration_s: secs,
+        counts: archive.manifest.counts,
+        migrations: archive.manifest.migrations.length,
+        removed_local: removedLocal,
+        local_only: true,
+      },
+    });
+    await withScope(ctx.pool, PLATFORM, async (c) => {
+      await resolveAlert(c, ALERT_FAILED);
+      await resolveAlert(c, ALERT_STALE);
+    });
+    ctx.log.info(
+      { file: name, size: archive.size, secs },
+      "backup concluído (somente no servidor)",
+    );
+    return;
+  }
 
   try {
     await ensureHostKey(ctx, s);
@@ -229,6 +262,8 @@ async function runBackup(ctx: BackupContext, run: RunRow) {
     const names = await uploadBackup(dest, archive.file, name);
     const removedRemote = filesToPrune(names, s.retention_remote).filter((n) => n !== name);
     await removeRemote(dest, removedRemote);
+    // Cópias locais: só depois do envio (com 0, nenhuma fica no servidor).
+    const removedLocal = await pruneLocal(ctx.backupDir, s.retention_local);
     const secs = Math.round((Date.now() - started) / 1000);
     await finish(ctx, run.id, "success", {
       file_name: name,

@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createPool, type Pool } from "@topcam/db";
 import type { MediaMtxClient } from "@topcam/shared";
 import type { FastifyInstance } from "fastify";
@@ -23,6 +26,8 @@ let pool: Pool;
 let redis: Redis;
 let app: FastifyInstance;
 
+const BACKUP_DIR = mkdtempSync(join(tmpdir(), "topcam-bkp-api-"));
+
 beforeAll(async () => {
   db = await createTestDb();
   pool = createPool(db.appUrl, 4);
@@ -38,6 +43,7 @@ beforeAll(async () => {
       STREAM_KEY_ENC_KEY: db.encKeyB64,
       JWT_SECRET: randomBytes(32).toString("hex"),
       PANEL_URL: "http://painel.teste",
+      BACKUP_DIR,
       LOG_LEVEL: "silent",
     }),
     pool,
@@ -51,6 +57,7 @@ afterAll(async () => {
   await pool?.end();
   redis?.disconnect();
   await db?.drop();
+  rmSync(BACKUP_DIR, { recursive: true, force: true });
 });
 
 async function loginRaw(email: string, password: string) {
@@ -265,5 +272,99 @@ describe("backup: configuração e pedidos", () => {
     expect(r.statusCode).toBe(200);
     const s = (await api(admin).get("/api/v1/backup")).json().settings;
     expect(s).toMatchObject({ protocol: "ftps", auth: "password", port: 21, hasPrivateKey: false });
+  });
+});
+
+describe("backup somente no servidor e download pelo painel", () => {
+  const FILE = "topcam-20260930-150000.tar.gpg";
+  const CONTENT = randomBytes(4096);
+  let runId = "";
+
+  it("somente no servidor: sem destino, exige ao menos 1 cópia; teste recusado; backup permitido", async () => {
+    await ownerQuery(
+      db,
+      "UPDATE backup_runs SET status = 'success', finished_at = now() WHERE status IN ('pending','running')",
+    );
+    const local = {
+      ...base,
+      host: "",
+      username: "",
+      localOnly: true,
+      enabled: true,
+      passphrase: "Senha-do-backup-2026",
+    };
+    const zero = await api(admin).put(S, { ...local, retentionLocal: 0 });
+    expect(zero.statusCode).toBe(400);
+    expect(zero.json().message).toMatch(/ao menos 1 cópia/);
+    expect((await api(admin).put(S, local)).statusCode).toBe(200);
+    expect((await api(admin).get("/api/v1/backup")).json().settings.localOnly).toBe(true);
+    const t = await api(admin).post("/api/v1/backup/test");
+    expect(t.statusCode).toBe(400);
+    expect(t.json().message).toMatch(/somente no servidor/);
+    expect((await api(admin).post("/api/v1/backup/run")).statusCode).toBe(202);
+  });
+
+  it("só aparece como baixável o backup que ainda está no servidor", async () => {
+    runId = (
+      await ownerQuery<{ id: string }>(
+        db,
+        `UPDATE backup_runs SET status = 'success', finished_at = now(), file_name = $1
+          WHERE id = (SELECT max(id) FROM backup_runs) RETURNING id::text`,
+        [FILE],
+      )
+    )[0]!.id;
+    let runs = (await api(admin).get("/api/v1/backup")).json().runs;
+    expect(runs.find((r: { id: string }) => r.id === runId).downloadable).toBe(false);
+    writeFileSync(join(BACKUP_DIR, FILE), CONTENT);
+    runs = (await api(admin).get("/api/v1/backup")).json().runs;
+    expect(runs.find((r: { id: string }) => r.id === runId).downloadable).toBe(true);
+  });
+
+  it("senha errada recusa; cliente não baixa", async () => {
+    const r = await api(admin).post("/api/v1/backup/download", { runId, password: "errada-123" });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().message).toBe("Senha incorreta");
+    expect(
+      (await api(alfaAdmin).post("/api/v1/backup/download", { runId, password: "GestorAlfa1" }))
+        .statusCode,
+    ).toBe(403);
+  });
+
+  it("senha certa → link de uso único que entrega o arquivo idêntico e registra na auditoria", async () => {
+    const r = await api(admin).post("/api/v1/backup/download", {
+      runId,
+      password: "NovaSenha2026",
+    });
+    expect(r.statusCode).toBe(200);
+    const { url, fileName } = r.json();
+    expect(fileName).toBe(FILE);
+    const dl = await app.inject({ method: "GET", url });
+    expect(dl.statusCode).toBe(200);
+    expect(dl.headers["content-disposition"]).toBe(`attachment; filename="${FILE}"`);
+    expect(dl.headers["cache-control"]).toBe("no-store");
+    expect(Buffer.compare(dl.rawPayload, CONTENT)).toBe(0);
+    // Uso único.
+    const again = await app.inject({ method: "GET", url });
+    expect(again.statusCode).toBe(404);
+    expect(again.json().message).toMatch(/expirado/);
+    const a = await ownerQuery<{ data: { file: string } }>(
+      db,
+      "SELECT data FROM audit_logs WHERE action = 'backup.downloaded'",
+    );
+    expect(a).toHaveLength(1);
+    expect(a[0]!.data.file).toBe(FILE);
+  });
+
+  it("link inventado ou backup que saiu do servidor: 404", async () => {
+    expect(
+      (await app.inject({ method: "GET", url: "/api/v1/backup/download/abc" })).statusCode,
+    ).toBe(404);
+    rmSync(join(BACKUP_DIR, FILE));
+    const r = await api(admin).post("/api/v1/backup/download", {
+      runId,
+      password: "NovaSenha2026",
+    });
+    expect(r.statusCode).toBe(404);
+    expect(r.json().message).toMatch(/não está mais no servidor/);
   });
 });

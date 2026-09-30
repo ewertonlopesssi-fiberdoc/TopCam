@@ -105,8 +105,13 @@ services:
   api:
     <<: *app
     command: ["node", "apps/api/dist/server.js"]
+    # Cópias locais do backup, só leitura (download pelo painel, Fase 8).
+    volumes:
+      - ./.data/backups:/backups:ro
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      storage-init:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -151,7 +156,8 @@ services:
     image: topcam/backup:${TOPCAM_VERSION:-0.1.0}
     restart: unless-stopped
     logging: *logging
-    # root: precisa ler o .env (0600, dono root no host). Cópias locais só o root lê.
+    # root: precisa ler o .env (0600, dono root no host). Cópias locais: root grava,
+    # a API (grupo 1000) só lê, para o download pelo painel.
     user: "0:0"
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -181,7 +187,7 @@ services:
       - sh
       - -c
       - mkdir -p /recordings/cam && chown -R 1000:1000 /recordings && chmod 0750 /recordings
-        && mkdir -p /backups && chown 0:0 /backups && chmod 0700 /backups
+        && mkdir -p /backups && chown 0:1000 /backups && chmod 0750 /backups
     volumes:
       - ${RECORDINGS_DIR:-./.data/recordings}:/recordings
       - ./.data/backups:/backups

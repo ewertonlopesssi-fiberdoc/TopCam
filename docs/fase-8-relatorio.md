@@ -373,11 +373,33 @@ Três defeitos encontrados nos testes e corrigidos:
 - **"Próximo backup":** o horário exibido errava em horários da tarde.
 - **Restauração:** o registro do backup restaurado aparecia como "interrompido".
 
+### Acréscimo: backup pela tela e download
+
+Pedido depois da primeira entrega da parte 3.
+
+- **"Onde guardar":**
+  - "Servidor externo (SFTP/FTPS/FTP)";
+  - ou "Somente neste servidor", sem destino externo. Nesse modo, o "Fazer backup agora" funciona sem SFTP/FTP, e o teste de conexão some. A tela avisa que um backup só na VM se perde junto com ela.
+- **Download pelo histórico:**
+  - o botão aparece em cada backup que ainda está entre as cópias do servidor;
+  - pede a **senha de login** de novo e devolve um **link de uso único, válido por 60 s**; o navegador baixa o `.tar.gpg` cifrado, que serve direto para o `restore.sh`;
+  - senha errada → "Senha incorreta";
+  - vale de qualquer lugar pelo HTTPS (decisão do Ewe); só o Super Admin baixa;
+  - fica registrado na auditoria (`backup.downloaded`, com arquivo e tamanho) e tem limite de 10 a cada 10 min.
+- **Leitura dos arquivos pela API:** a API lê a pasta `.data/backups` só para leitura, pelo grupo 1000. Os arquivos ficam 0640, e a pasta 0750 (dono root, grupo 1000).
+- **Correção de regra:** "0 cópias no servidor" antes significava "sem limite". Agora significa "apaga do servidor depois de enviar ao destino". A limpeza local passou a acontecer só depois do envio bem-sucedido. No modo "somente no servidor", o mínimo é 1 cópia.
+- **Testes:**
+  - API: 5 novos testes (modo "somente no servidor", marcação de baixável, senha errada, link de uso único com arquivo idêntico e auditoria, link inválido ou arquivo removido);
+  - E2E: backup pela tela e download com a senha;
+  - ao vivo: arquivo baixado idêntico ao do servidor e aberto com a senha do backup; reusar o link → 404; com 0 cópias, nada fica na VM depois do envio.
+- **Correção de tela:** o histórico alargava a página em tablet e celular, porque o rótulo oculto do botão de download escapava da área de rolagem da tabela. Isso também atrapalhava a janela do firewall no celular. Corrigido; o teste de telas responsivas voltou a passar.
+- **Totais:** 212/212 testes automatizados; E2E 42/42.
+
 ### Procedimento na VM (parte 3)
 
 1. Atualizar com o bundle (`scripts/update.sh --bundle …`). Isso constrói a imagem `topcam/backup` (a primeira vez leva alguns minutos) e aplica a migração 0009.
 2. Conferir em Configurações → Integrações → Backup: deve aparecer "Serviço de backup ativo".
-3. **Destino real:** preencher, salvar, "Testar conexão" e "Fazer backup agora". Anote a identidade do servidor SFTP que aparecer.
+3. **Destino real:** preencher, salvar, "Testar conexão" e "Fazer backup agora". Anote a identidade do servidor SFTP que aparecer. Sem destino ainda: use "Somente neste servidor", faça o backup e baixe pelo histórico.
 4. **Guardar a senha do backup fora do servidor.**
 5. Conferir o arquivo na VM, sem restaurar nada:
    ```

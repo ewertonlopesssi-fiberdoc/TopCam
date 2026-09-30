@@ -1,8 +1,16 @@
 "use client";
 
-import { AlertTriangle, DatabaseBackup, KeyRound, Loader2, Play, PlugZap } from "lucide-react";
+import {
+  AlertTriangle,
+  DatabaseBackup,
+  Download,
+  KeyRound,
+  Loader2,
+  Play,
+  PlugZap,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { Badge, Confirm, ErrorBox, Field, useToast } from "@/components/ui";
+import { Badge, Confirm, ErrorBox, Field, Modal, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtBytes, fmtDateTime, fmtRelative } from "@/lib/format";
 
@@ -14,6 +22,7 @@ import { fmtBytes, fmtDateTime, fmtRelative } from "@/lib/format";
 type Protocol = "sftp" | "ftps" | "ftp";
 interface Settings {
   enabled: boolean;
+  localOnly: boolean;
   protocol: Protocol;
   host: string;
   port: number;
@@ -42,6 +51,7 @@ interface Run {
   error: string | null;
   details: { host_key_changed?: boolean };
   requestedBy: string | null;
+  downloadable: boolean;
 }
 interface BackupInfo {
   settings: Settings;
@@ -72,6 +82,10 @@ export function BackupCard() {
   const [error, setError] = useState<unknown>(null);
   const [acceptKey, setAcceptKey] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [download, setDownload] = useState<Run | null>(null);
+  const [dlPassword, setDlPassword] = useState("");
+  const [dlBusy, setDlBusy] = useState(false);
+  const [dlError, setDlError] = useState<unknown>(null);
 
   const load = useCallback(async (resetForm = false) => {
     try {
@@ -116,6 +130,7 @@ export function BackupCard() {
     try {
       const r = await api.put<{ hostKeyReset: boolean }>("/backup/settings", {
         enabled: form.enabled,
+        localOnly: form.localOnly,
         protocol: form.protocol,
         host: form.host,
         port: form.port,
@@ -165,7 +180,7 @@ export function BackupCard() {
     JSON.stringify(form) !== JSON.stringify(info.settings) || !!password || !!privateKey || !!pass1;
 
   return (
-    <div className="rounded-lg border border-line p-4" data-testid="backup-card">
+    <div className="min-w-0 rounded-lg border border-line p-4" data-testid="backup-card">
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <DatabaseBackup size={18} className="text-brand-600" />
         <h3 className="font-medium">Backup</h3>
@@ -197,137 +212,172 @@ export function BackupCard() {
       <ErrorBox error={error} />
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
-        <Field label="Protocolo" className="md:col-span-2">
+        <Field label="Onde guardar" className="md:col-span-6">
           <select
             className="input"
-            value={form.protocol}
+            value={form.localOnly ? "local" : "remote"}
             onChange={(e) => {
-              const p = e.target.value as Protocol;
-              setForm((f) => (f ? { ...f, protocol: p, port: DEFAULT_PORT[p] } : f));
+              const local = e.target.value === "local";
+              setForm((f) =>
+                f
+                  ? {
+                      ...f,
+                      localOnly: local,
+                      retentionLocal: local ? Math.max(1, f.retentionLocal) : f.retentionLocal,
+                    }
+                  : f,
+              );
             }}
           >
-            <option value="sftp">SFTP (recomendado)</option>
-            <option value="ftps">FTPS (FTP com TLS)</option>
-            <option value="ftp">FTP (sem criptografia)</option>
+            <option value="remote">Servidor externo (SFTP/FTPS/FTP)</option>
+            <option value="local">Somente neste servidor</option>
           </select>
         </Field>
-        <Field label="Servidor" className="md:col-span-3">
-          <input
-            className="input"
-            value={form.host}
-            onChange={(e) => set("host", e.target.value.trim())}
-            placeholder="backup.empresa.com.br ou IP"
-          />
-        </Field>
-        <Field label="Porta" className="md:col-span-1">
-          <input
-            className="input"
-            type="number"
-            value={form.port}
-            onChange={(e) => set("port", Number(e.target.value))}
-          />
-        </Field>
-        {form.protocol === "ftp" && (
+        {form.localOnly ? (
           <p className="flex items-start gap-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800 md:col-span-6">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-            No FTP simples, o usuário e a senha do destino trafegam sem proteção. O arquivo do
-            backup continua cifrado, mas prefira SFTP ou FTPS.
+            Os arquivos ficam só nesta VM: se ela for perdida, os backups vão junto. Baixe-os pelo
+            histórico abaixo e guarde fora do servidor, ou configure um destino externo.
           </p>
-        )}
-        <Field label="Usuário" className="md:col-span-2">
-          <input
-            className="input"
-            autoComplete="off"
-            value={form.username}
-            onChange={(e) => set("username", e.target.value.trim())}
-          />
-        </Field>
-        {form.protocol === "sftp" && (
-          <Field label="Autenticação" className="md:col-span-2">
-            <select
-              className="input"
-              value={form.auth}
-              onChange={(e) => set("auth", e.target.value as Settings["auth"])}
-            >
-              <option value="password">Senha</option>
-              <option value="key">Chave SSH</option>
-            </select>
-          </Field>
-        )}
-        {form.protocol === "sftp" && form.auth === "key" ? (
-          <Field
-            label="Chave SSH privada"
-            className="md:col-span-6"
-            hint={
-              info.settings.hasPrivateKey
-                ? "Chave salva. Deixe em branco para manter."
-                : "Cole a chave PRIVADA sem senha, exclusiva para o backup (a pública vai no servidor)."
-            }
-          >
-            <textarea
-              className="input h-24 py-2 font-mono text-xs"
-              value={privateKey}
-              onChange={(e) => setPrivateKey(e.target.value)}
-              placeholder={
-                info.settings.hasPrivateKey ? "••••••••••••" : "-----BEGIN OPENSSH PRIVATE KEY-----"
-              }
-            />
-          </Field>
         ) : (
-          <Field
-            label="Senha do destino"
-            className={form.protocol === "sftp" ? "md:col-span-2" : "md:col-span-4"}
-            hint={
-              info.settings.hasPassword ? "Senha salva. Deixe em branco para manter." : undefined
-            }
-          >
-            <input
-              className="input"
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={info.settings.hasPassword ? "••••••••••••" : ""}
-            />
-          </Field>
-        )}
-        <Field label="Pasta no destino" className="md:col-span-3" hint="Criada se não existir.">
-          <input
-            className="input"
-            value={form.path}
-            onChange={(e) => set("path", e.target.value.trim())}
-            placeholder="topcam-backups"
-          />
-        </Field>
-        {form.protocol === "ftps" && (
-          <label className="flex items-center gap-2 text-sm md:col-span-3">
-            <input
-              type="checkbox"
-              className="h-4 w-4"
-              checked={form.verifyCertificate}
-              onChange={(e) => set("verifyCertificate", e.target.checked)}
-            />
-            Conferir o certificado do servidor (desmarque só para certificado próprio)
-          </label>
-        )}
-        {form.protocol === "sftp" && (
-          <div className="text-xs text-slate-600 md:col-span-3">
-            <span className="text-muted">Identidade do servidor: </span>
-            {info.settings.hostKeyFingerprint ? (
-              <code className="break-all">{info.settings.hostKeyFingerprint}</code>
-            ) : (
-              <span>registrada no primeiro teste de conexão</span>
-            )}
-            {(lastFailedKey || info.settings.hostKeyFingerprint) && (
-              <button
-                type="button"
-                className="ml-2 font-medium text-brand-600 hover:underline"
-                onClick={() => setAcceptKey(true)}
+          <>
+            <Field label="Protocolo" className="md:col-span-2">
+              <select
+                className="input"
+                value={form.protocol}
+                onChange={(e) => {
+                  const p = e.target.value as Protocol;
+                  setForm((f) => (f ? { ...f, protocol: p, port: DEFAULT_PORT[p] } : f));
+                }}
               >
-                Aceitar nova identidade
-              </button>
+                <option value="sftp">SFTP (recomendado)</option>
+                <option value="ftps">FTPS (FTP com TLS)</option>
+                <option value="ftp">FTP (sem criptografia)</option>
+              </select>
+            </Field>
+            <Field label="Servidor" className="md:col-span-3">
+              <input
+                className="input"
+                value={form.host}
+                onChange={(e) => set("host", e.target.value.trim())}
+                placeholder="backup.empresa.com.br ou IP"
+              />
+            </Field>
+            <Field label="Porta" className="md:col-span-1">
+              <input
+                className="input"
+                type="number"
+                value={form.port}
+                onChange={(e) => set("port", Number(e.target.value))}
+              />
+            </Field>
+            {form.protocol === "ftp" && (
+              <p className="flex items-start gap-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800 md:col-span-6">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                No FTP simples, o usuário e a senha do destino trafegam sem proteção. O arquivo do
+                backup continua cifrado, mas prefira SFTP ou FTPS.
+              </p>
             )}
-          </div>
+            <Field label="Usuário" className="md:col-span-2">
+              <input
+                className="input"
+                autoComplete="off"
+                value={form.username}
+                onChange={(e) => set("username", e.target.value.trim())}
+              />
+            </Field>
+            {form.protocol === "sftp" && (
+              <Field label="Autenticação" className="md:col-span-2">
+                <select
+                  className="input"
+                  value={form.auth}
+                  onChange={(e) => set("auth", e.target.value as Settings["auth"])}
+                >
+                  <option value="password">Senha</option>
+                  <option value="key">Chave SSH</option>
+                </select>
+              </Field>
+            )}
+            {form.protocol === "sftp" && form.auth === "key" ? (
+              <Field
+                label="Chave SSH privada"
+                className="md:col-span-6"
+                hint={
+                  info.settings.hasPrivateKey
+                    ? "Chave salva. Deixe em branco para manter."
+                    : "Cole a chave PRIVADA sem senha, exclusiva para o backup (a pública vai no servidor)."
+                }
+              >
+                <textarea
+                  className="input h-24 py-2 font-mono text-xs"
+                  value={privateKey}
+                  onChange={(e) => setPrivateKey(e.target.value)}
+                  placeholder={
+                    info.settings.hasPrivateKey
+                      ? "••••••••••••"
+                      : "-----BEGIN OPENSSH PRIVATE KEY-----"
+                  }
+                />
+              </Field>
+            ) : (
+              <Field
+                label="Senha do destino"
+                className={form.protocol === "sftp" ? "md:col-span-2" : "md:col-span-4"}
+                hint={
+                  info.settings.hasPassword
+                    ? "Senha salva. Deixe em branco para manter."
+                    : undefined
+                }
+              >
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={info.settings.hasPassword ? "••••••••••••" : ""}
+                />
+              </Field>
+            )}
+            <Field label="Pasta no destino" className="md:col-span-3" hint="Criada se não existir.">
+              <input
+                className="input"
+                value={form.path}
+                onChange={(e) => set("path", e.target.value.trim())}
+                placeholder="topcam-backups"
+              />
+            </Field>
+            {form.protocol === "ftps" && (
+              <label className="flex items-center gap-2 text-sm md:col-span-3">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={form.verifyCertificate}
+                  onChange={(e) => set("verifyCertificate", e.target.checked)}
+                />
+                Conferir o certificado do servidor (desmarque só para certificado próprio)
+              </label>
+            )}
+            {form.protocol === "sftp" && (
+              <div className="text-xs text-slate-600 md:col-span-3">
+                <span className="text-muted">Identidade do servidor: </span>
+                {info.settings.hostKeyFingerprint ? (
+                  <code className="break-all">{info.settings.hostKeyFingerprint}</code>
+                ) : (
+                  <span>registrada no primeiro teste de conexão</span>
+                )}
+                {(lastFailedKey || info.settings.hostKeyFingerprint) && (
+                  <button
+                    type="button"
+                    className="ml-2 font-medium text-brand-600 hover:underline"
+                    onClick={() => setAcceptKey(true)}
+                  >
+                    Aceitar nova identidade
+                  </button>
+                )}
+              </div>
+            )}
+          </>
         )}
         <Field label="Horário diário" className="md:col-span-2" hint="Horário de Brasília.">
           <input
@@ -337,21 +387,27 @@ export function BackupCard() {
             onChange={(e) => set("scheduleTime", e.target.value)}
           />
         </Field>
-        <Field label="Cópias no destino" className="md:col-span-2">
+        {!form.localOnly && (
+          <Field label="Cópias no destino" className="md:col-span-2">
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={365}
+              value={form.retentionRemote}
+              onChange={(e) => set("retentionRemote", Number(e.target.value))}
+            />
+          </Field>
+        )}
+        <Field
+          label="Cópias no servidor"
+          className="md:col-span-2"
+          hint={form.localOnly ? undefined : "0 = apaga do servidor depois de enviar."}
+        >
           <input
             className="input"
             type="number"
-            min={1}
-            max={365}
-            value={form.retentionRemote}
-            onChange={(e) => set("retentionRemote", Number(e.target.value))}
-          />
-        </Field>
-        <Field label="Cópias no servidor" className="md:col-span-2">
-          <input
-            className="input"
-            type="number"
-            min={0}
+            min={form.localOnly ? 1 : 0}
             max={30}
             value={form.retentionLocal}
             onChange={(e) => set("retentionLocal", Number(e.target.value))}
@@ -405,15 +461,21 @@ export function BackupCard() {
         <button className="btn-primary" disabled={busy !== ""} onClick={() => void save()}>
           {busy === "save" && <Loader2 size={16} className="animate-spin" />} Salvar
         </button>
-        <button
-          className="btn-secondary"
-          disabled={busy !== "" || !!active || unsaved}
-          onClick={() => void request("test")}
-          title={unsaved ? "Salve antes de testar" : undefined}
-        >
-          {busy === "test" ? <Loader2 size={16} className="animate-spin" /> : <PlugZap size={16} />}{" "}
-          Testar conexão
-        </button>
+        {!info.settings.localOnly && (
+          <button
+            className="btn-secondary"
+            disabled={busy !== "" || !!active || unsaved}
+            onClick={() => void request("test")}
+            title={unsaved ? "Salve antes de testar" : undefined}
+          >
+            {busy === "test" ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <PlugZap size={16} />
+            )}{" "}
+            Testar conexão
+          </button>
+        )}
         <button
           className="btn-secondary"
           disabled={busy !== "" || !!active || unsaved || !info.settings.hasPassphrase}
@@ -431,7 +493,7 @@ export function BackupCard() {
         {info.runs.length === 0 ? (
           <p className="text-sm text-muted">Nenhum backup ou teste ainda.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="relative max-w-full overflow-x-auto">
             <table className="w-full text-sm" aria-label="Histórico do backup">
               <thead>
                 <tr>
@@ -440,6 +502,9 @@ export function BackupCard() {
                   <th className="th">Resultado</th>
                   <th className="th hidden md:table-cell">Arquivo</th>
                   <th className="th">Detalhe</th>
+                  <th className="th">
+                    <span className="sr-only">Baixar</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -473,9 +538,21 @@ export function BackupCard() {
                       )}
                     </td>
                     <td
-                      className={`td min-w-[14rem] whitespace-normal text-xs ${r.error ? "text-red-700" : "text-slate-600"}`}
+                      className={`td min-w-[10rem] whitespace-normal text-xs ${r.error ? "text-red-700" : "text-slate-600"}`}
                     >
                       {r.error ?? r.message ?? ""}
+                    </td>
+                    <td className="td w-10 px-2 text-right">
+                      {r.downloadable && (
+                        <button
+                          className="icon-btn"
+                          title="Baixar (pede sua senha)"
+                          aria-label={`Baixar ${r.fileName}`}
+                          onClick={() => (setDownload(r), setDlPassword(""), setDlError(null))}
+                        >
+                          <Download size={16} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -494,6 +571,67 @@ export function BackupCard() {
         )}
       </div>
 
+      <Modal
+        open={!!download}
+        title="Baixar backup"
+        onClose={() => setDownload(null)}
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setDownload(null)}>
+              Cancelar
+            </button>
+            <button
+              className="btn-primary"
+              disabled={dlBusy || !dlPassword}
+              onClick={async () => {
+                setDlBusy(true);
+                setDlError(null);
+                try {
+                  const r = await api.post<{ url: string; fileName: string }>("/backup/download", {
+                    runId: download!.id,
+                    password: dlPassword,
+                  });
+                  // Link de uso único: o navegador baixa direto, sem passar pela memória da página.
+                  const a = document.createElement("a");
+                  a.href = `${window.location.origin}${r.url}`;
+                  a.download = r.fileName;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  setDownload(null);
+                  toast(`Baixando ${r.fileName}`);
+                } catch (err) {
+                  setDlError(err);
+                } finally {
+                  setDlBusy(false);
+                  setDlPassword("");
+                }
+              }}
+            >
+              {dlBusy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}{" "}
+              Baixar
+            </button>
+          </>
+        }
+      >
+        <ErrorBox error={dlError} />
+        <p className="mb-3 text-sm text-slate-700">
+          <code className="break-all">{download?.fileName}</code>
+          {download?.sizeBytes != null && <> ({fmtBytes(download.sizeBytes)})</>}. O arquivo está
+          cifrado: só abre com a <strong>senha do backup</strong>. O download fica registrado na
+          auditoria.
+        </p>
+        <Field label="Confirme sua senha de acesso ao painel">
+          <input
+            className="input"
+            type="password"
+            autoComplete="current-password"
+            value={dlPassword}
+            onChange={(e) => setDlPassword(e.target.value)}
+            autoFocus
+          />
+        </Field>
+      </Modal>
       <Confirm
         open={acceptKey}
         title="Aceitar nova identidade do servidor"

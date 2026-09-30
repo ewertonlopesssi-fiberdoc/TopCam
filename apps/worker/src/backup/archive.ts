@@ -1,4 +1,4 @@
-import { copyFile, mkdir, rename, stat } from "node:fs/promises";
+import { chmod, chown, copyFile, mkdir, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import pg from "pg";
 import { lastLine, privateDir, run, writePrivate } from "./tools.js";
@@ -159,6 +159,9 @@ export async function createArchive(opts: {
       throw new Error(`O arquivo cifrado não passou na conferência: ${lastLine(check.stderr)}`);
 
     await rename(`${out}.tmp`, out);
+    // Leitura para o grupo 1000 (a API baixa pelo painel, só leitura); ninguém mais lê.
+    await chmod(out, 0o640);
+    if (process.getuid?.() === 0) await chown(out, 0, 1000).catch(() => undefined);
     return { file: out, size: (await stat(out)).size, manifest };
   } finally {
     await tmp.cleanup();

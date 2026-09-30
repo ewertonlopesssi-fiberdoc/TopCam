@@ -9,6 +9,8 @@ export type BackupProtocol = "sftp" | "ftps" | "ftp";
 
 export interface BackupSettings {
   enabled: boolean;
+  /** true = sem destino externo: o arquivo fica só no servidor (baixado pelo painel). */
+  local_only: boolean;
   protocol: BackupProtocol;
   host: string;
   port: number;
@@ -36,6 +38,7 @@ export interface BackupSettings {
 
 export const DEFAULT_BACKUP_SETTINGS: BackupSettings = {
   enabled: false,
+  local_only: false,
   protocol: "sftp",
   host: "",
   port: 22,
@@ -131,10 +134,14 @@ export function backupFileName(at: Date, tz = BACKUP_TZ): string {
   return `topcam-${l.y}${pad(l.m)}${pad(l.d)}-${pad(l.hh)}${pad(l.mm)}${pad(Number(s))}.tar.gpg`;
 }
 
-/** Quais arquivos apagar para manter só os `keep` mais recentes (nomes ordenam por data). */
+/**
+ * Quais arquivos apagar para manter só os `keep` mais recentes (nomes ordenam por data).
+ * keep = 0 → todos os nossos (ex.: nenhuma cópia local depois de enviar ao destino).
+ */
 export function filesToPrune(names: string[], keep: number): string[] {
   const ours = names.filter((n) => BACKUP_FILE_RE.test(n)).sort();
-  return keep > 0 && ours.length > keep ? ours.slice(0, ours.length - keep) : [];
+  const k = Math.max(0, keep);
+  return ours.length > k ? ours.slice(0, ours.length - k) : [];
 }
 
 /** Campos cifrados com STREAM_KEY_ENC_KEY (recifrados pela troca da chave de cifra). */

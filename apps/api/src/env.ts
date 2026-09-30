@@ -48,6 +48,9 @@ const schema = z.object({
   /** Duração do bloqueio de quem erra chave de câmera (segundos). */
   PUBLISH_BADKEY_BLOCK_S: z.coerce.number().int().positive().default(1800),
 
+  /** Cópias locais do backup (montadas só leitura; download pelo painel). */
+  BACKUP_DIR: z.string().default("/backups"),
+
   // ---- ao vivo (Fase 3)
   /** Validade do endereço temporário do ao vivo. A sessão e a permissão são reconferidas a cada acesso. */
   LIVE_TOKEN_TTL_S: z.coerce.number().int().min(60).default(7200),

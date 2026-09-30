@@ -66,7 +66,12 @@ describe("retenção", () => {
     ];
     expect(filesToPrune(names, 2)).toEqual(["topcam-20260901-033000.tar.gpg"]);
     expect(filesToPrune(names, 5)).toEqual([]);
-    expect(filesToPrune(names, 0)).toEqual([]);
+    // 0 = nenhuma cópia: apaga todos os nossos (e só os nossos)
+    expect(filesToPrune(names, 0)).toEqual([
+      "topcam-20260901-033000.tar.gpg",
+      "topcam-20260902-033000.tar.gpg",
+      "topcam-20260903-033000.tar.gpg",
+    ]);
   });
 
   it("pasta: aceita caminhos simples, recusa .. e caracteres de shell", () => {
