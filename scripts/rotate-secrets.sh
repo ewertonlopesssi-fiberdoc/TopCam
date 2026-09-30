@@ -10,7 +10,7 @@
 #   --media  MEDIA_HOOK_SECRET, MEDIA_READ_PASSWORD, MEDIA_GATEWAY_TOKEN (comunicação interna).
 #            O servidor de mídia reinicia: câmeras reconectam sozinhas em segundos.
 #   --db     POSTGRES_PASSWORD (dono do banco) e APP_DB_PASSWORD (aplicação).
-#   --enc    STREAM_KEY_ENC_KEY: recifra no banco as chaves das câmeras e a senha do SMTP
+#   --enc    STREAM_KEY_ENC_KEY: recifra no banco as chaves das câmeras, a senha do SMTP e as do backup
 #            (uma transação: ou tudo, ou nada). As chaves RTMP das câmeras NÃO mudam.
 #
 # Segurança: cópia do .env antes (.env.antes-rotacao.<data>, só root lê); segredos nunca
@@ -92,8 +92,8 @@ if [ $ENC = 1 ]; then
   NEW_ENC=$(openssl rand -base64 32)
   # Guarda a chave nova antes de mexer no banco: se algo cair no meio, ela não se perde.
   (umask 077 && printf 'STREAM_KEY_ENC_KEY_NOVA=%s\nSTREAM_KEY_ENC_KEY_ANTIGA=%s\n' "$NEW_ENC" "$OLD_ENC" >".env.rotacao-pendente")
-  log "parando o worker durante a recifragem"
-  dc stop worker >/dev/null
+  log "parando o worker e o backup durante a recifragem"
+  dc stop worker backup >/dev/null
   log "recifrando no banco (chaves das câmeras e senha do SMTP)"
   if ! printf '%s\n%s\n' "$OLD_ENC" "$NEW_ENC" | cli secrets:reencrypt; then
     # Primeiro desfaz a senha do dono; só então religa o worker (sem dependências, para
@@ -102,7 +102,8 @@ if [ $ENC = 1 ]; then
       printf "ALTER ROLE topcam_owner PASSWORD '%s';\n" "$OLD_OWNER" |
         dc exec -T postgres psql -U topcam_owner -d topcam -v ON_ERROR_STOP=1 -q -f - >/dev/null || true
     fi
-    dc up -d --no-deps worker >/dev/null 2>&1 || echo "atenção: religue o worker: docker compose up -d worker" >&2
+    dc up -d --no-deps worker backup >/dev/null 2>&1 ||
+      echo "atenção: religue os serviços: docker compose up -d worker backup" >&2
     rm -f .env.rotacao-pendente
     die "recifragem falhou e foi desfeita; nenhum segredo foi trocado"
   fi

@@ -12,6 +12,7 @@ import { storageRoutes } from "./routes/storage.js";
 import { integrationRoutes } from "./routes/integrations.js";
 import { monitoringRoutes } from "./routes/monitoring.js";
 import { authRoutes } from "./routes/auth.js";
+import { backupRoutes } from "./routes/backup.js";
 import { cameraRoutes } from "./routes/cameras.js";
 import { firewallRoutes } from "./routes/firewall.js";
 import { healthRoutes } from "./routes/health.js";
@@ -88,5 +89,6 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(integrationRoutes);
   await app.register(monitoringRoutes);
   await app.register(firewallRoutes);
+  await app.register(backupRoutes);
   return app;
 }

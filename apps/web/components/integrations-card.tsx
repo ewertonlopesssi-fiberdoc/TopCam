@@ -2,6 +2,7 @@
 
 import { CheckCircle2, Loader2, Mail, Send, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { BackupCard } from "@/components/backup-card";
 import { ErrorBox, Field, useToast } from "@/components/ui";
 import { api } from "@/lib/api";
 import { fmtDateTime } from "@/lib/format";
@@ -126,7 +127,7 @@ export function IntegrationsCard() {
       <h2 className="font-semibold">Integrações</h2>
       <p className="mb-4 text-sm text-muted">Serviços externos usados pela plataforma.</p>
 
-      <div className="rounded-lg border border-line p-4">
+      <div className="rounded-lg border border-line p-4" data-testid="integrations-smtp">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Mail size={18} className="text-brand-600" />
           <h3 className="font-medium">E-mail (SMTP) — alertas</h3>
@@ -328,6 +329,9 @@ export function IntegrationsCard() {
             </ul>
           </div>
         )}
+      </div>
+      <div className="mt-4">
+        <BackupCard />
       </div>
     </section>
   );

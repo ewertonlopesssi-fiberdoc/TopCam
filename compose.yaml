@@ -140,6 +140,36 @@ services:
 
   # Prepara a pasta de gravações: dono = usuário 1000, o mesmo do MediaMTX (que
   # grava) e do worker (que confere e apaga pela retenção). Roda a cada subida.
+  # Backup (Fase 8): dump do banco + .env, cifrados, enviados ao destino configurado no painel
+  # (Configurações → Backup). Único serviço com a senha do dono do banco.
+  backup:
+    build:
+      context: .
+      target: backup
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+    image: topcam/backup:${TOPCAM_VERSION:-0.1.0}
+    restart: unless-stopped
+    logging: *logging
+    # root: precisa ler o .env (0600, dono root no host). Cópias locais só o root lê.
+    user: "0:0"
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://topcam_app:${APP_DB_PASSWORD:?defina APP_DB_PASSWORD}@postgres:5432/topcam
+      STREAM_KEY_ENC_KEY: ${STREAM_KEY_ENC_KEY:?defina STREAM_KEY_ENC_KEY}
+      BACKUP_DB_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+    volumes:
+      - ./.env:/topcam/.env:ro
+      - ./.data/backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+
   storage-init:
     # Mesma imagem da aplicação (construída pelos serviços api/worker); não constrói de novo.
     image: topcam/app:${TOPCAM_VERSION:-0.1.0}
@@ -151,8 +181,10 @@ services:
       - sh
       - -c
       - mkdir -p /recordings/cam && chown -R 1000:1000 /recordings && chmod 0750 /recordings
+        && mkdir -p /backups && chown 0:0 /backups && chmod 0700 /backups
     volumes:
       - ${RECORDINGS_DIR:-./.data/recordings}:/recordings
+      - ./.data/backups:/backups
 
   mediamtx:
     image: bluenviron/mediamtx:1.21.1-ffmpeg

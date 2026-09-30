@@ -11,6 +11,7 @@ import {
   withScope,
 } from "@topcam/db";
 import {
+  BACKUP_ENCRYPTED_FIELDS,
   decryptStreamKey,
   generateTempPassword,
   hashPassword,
@@ -119,14 +120,20 @@ async function main() {
         action: "secrets.reencrypted",
         entityType: "secret",
         entityId: "STREAM_KEY_ENC_KEY",
-        data: { cameras: res.cameras, camerasAlreadyNew: res.camerasAlreadyNew, smtp: res.smtp },
+        data: {
+          cameras: res.cameras,
+          camerasAlreadyNew: res.camerasAlreadyNew,
+          smtp: res.smtp,
+          backup: res.backup,
+        },
       });
       return res;
     });
     console.log(
       `recifrado: ${r.cameras} chave(s) de câmera` +
         (r.camerasAlreadyNew ? ` (${r.camerasAlreadyNew} já na chave nova)` : "") +
-        `; senha do SMTP: ${{ reencrypted: "recifrada", already_new: "já na chave nova", none: "não configurada" }[r.smtp]}`,
+        `; senha do SMTP: ${{ reencrypted: "recifrada", already_new: "já na chave nova", none: "não configurada" }[r.smtp]}` +
+        `; backup: ${r.backup} campo(s) recifrado(s)`,
     );
     return;
   }
@@ -162,13 +169,29 @@ async function main() {
           smtpOk = false;
         }
       }
-      return { ok, bad, smtpOk };
+      const bkp = (
+        await c.query<{ value: Record<string, string | null> }>(
+          "SELECT value FROM system_settings WHERE key = 'integrations.backup'",
+        )
+      ).rows[0]?.value;
+      let backupBad = 0;
+      for (const f of BACKUP_ENCRYPTED_FIELDS) {
+        const v = bkp?.[f];
+        if (!v) continue;
+        try {
+          decryptStreamKey(v, encKey);
+        } catch {
+          backupBad++;
+        }
+      }
+      return { ok, bad, smtpOk, backupBad };
     });
     console.log(
       `chaves de câmera legíveis: ${r.ok}; ilegíveis: ${r.bad.length}${r.bad.length ? ` (${r.bad.slice(0, 10).join(", ")})` : ""}; ` +
-        `senha do SMTP: ${r.smtpOk === null ? "não configurada" : r.smtpOk ? "legível" : "ILEGÍVEL"}`,
+        `senha do SMTP: ${r.smtpOk === null ? "não configurada" : r.smtpOk ? "legível" : "ILEGÍVEL"}; ` +
+        `senhas do backup: ${r.backupBad ? `${r.backupBad} ILEGÍVEL(IS)` : "ok"}`,
     );
-    if (r.bad.length || r.smtpOk === false) process.exitCode = 1;
+    if (r.bad.length || r.smtpOk === false || r.backupBad) process.exitCode = 1;
     return;
   }
 

@@ -6,7 +6,7 @@ Entregue em partes. Este documento é atualizado a cada parte.
 |---|---|---|
 | 1 | HTTPS (Let's Encrypt), RTMPS, firewall editável no painel | **aprovada na VM em 30/09/2026** (RTMPS pronto, ainda desligado) |
 | 2 | Limite de requisições (rate limit) e rotação de segredos com recriptografia | **implementada e testada no laboratório; aguardando aplicação na VM** |
-| 3 | Backup remoto configurável no painel (SFTP/FTPS/FTP, cifrado) | a fazer |
+| 3 | Backup remoto configurável no painel (SFTP/FTPS/FTP, cifrado) e restauração | **implementada e testada no laboratório; aguardando aplicação na VM e o destino real** |
 | 4 | Restauração em VM limpa, testes de reinício, relatório de 7 dias, aceite | a fazer |
 
 ---
@@ -259,3 +259,129 @@ Novos comandos da CLI da API: `secrets:reencrypt`, `secrets:check` e `secrets:ro
    Digite `SIM` para confirmar. Leva cerca de 30 s. Depois:
    - confira painel, ao vivo e câmeras;
    - apague a cópia com `rm .env.antes-rotacao.*`.
+
+---
+
+## Parte 3 — Backup e restauração
+
+### O que foi feito
+
+**Serviço de backup (contêiner `backup`)**
+
+- É o único com a senha do dono do banco: o dump precisa enxergar todos os clientes. A API e o worker continuam sem essa senha.
+- Roda como root no contêiner, porque precisa ler o `.env` (0600, dono root no host). As cópias locais ficam em `.data/backups`, também só para o root.
+- Executa um pedido por vez: teste de conexão, backup agora e backup diário agendado.
+- Manda sinal de vida a cada 30 s. O painel mostra "Serviço de backup parado" se ele sumir por mais de 2 minutos.
+
+**Arquivo `topcam-AAAAMMDD-HHMMSS.tar.gpg`**
+
+- Contém `topcam.dump` (pg_dump completo), `topcam.env` e `manifest.json` (data, versão, nome do arquivo, migrations e contagens).
+- É cifrado com AES-256 (OpenPGP simétrico, senha fortalecida por SHA-512 com cerca de 65 milhões de iterações) e aberto de novo para conferência antes de ser enviado.
+- Gravações de vídeo não entram.
+
+**Envio (`lftp`)**
+
+- **SFTP** (recomendado):
+  - autenticação por senha ou por chave SSH sem senha; chave protegida por senha é recusada com explicação;
+  - a identidade do servidor é **registrada no primeiro teste**;
+  - se ela mudar, o envio é recusado, e o painel oferece "Aceitar nova identidade", com aviso sobre servidor impostor;
+  - trocar o servidor, a porta ou o protocolo esquece a identidade registrada.
+- **FTPS:** confere o certificado por padrão, com opção para certificado próprio. A porta 990 usa TLS implícito.
+- **FTP:** permitido, com aviso de que usuário e senha trafegam sem proteção.
+- O arquivo é enviado como `.part` e renomeado no fim, então um envio pela metade nunca conta como backup.
+- A retenção apaga só arquivos do padrão `topcam-…tar.gpg`.
+
+**Agenda e retenção**
+
+- Diário, no horário de Brasília (padrão 03:30).
+- Se o agendado falhar, faz até 3 tentativas, com 30 minutos entre elas.
+- Retenção padrão: 14 cópias no destino e 3 no servidor.
+- Se o envio falhar, a cópia local é mantida.
+
+**Alertas** (usam o e-mail de alertas que já existe)
+
+- "Backup falhou: <motivo>" (erro): fecha sozinho no próximo sucesso.
+- "Nenhum backup concluído nas últimas 26 horas": abre também se o backup está ligado há 26 h sem nenhum sucesso.
+
+**Painel (Configurações → Integrações → Backup)**
+
+- Destino, autenticação, pasta, horário e retenção.
+- **Senha do backup**, com confirmação e no mínimo 12 caracteres, e o aviso para guardá-la fora do servidor.
+- "Testar conexão", "Salvar", "Fazer backup agora" e o histórico das últimas 20 execuções.
+- Senhas e chave nunca voltam do servidor: campo em branco mantém a salva.
+
+**Segurança**
+
+- Senhas do destino, chave SSH e senha do backup ficam cifradas no banco.
+- A troca da chave de cifra (`rotate-secrets.sh --enc`) passou a recifrá-las também, e `secrets:check` as confere.
+- Auditoria sem segredos: `backup.settings_updated`, `backup.test_requested`, `backup.run_requested`, `backup.host_key_reset`.
+- Pedidos de teste e de backup têm limite de 10 a cada 10 min.
+
+**Restauração: `scripts/restore.sh --file <arquivo>`**
+
+- `--check` só abre e mostra o resumo.
+- Sem `--check`:
+  - pede a senha e confere o dump;
+  - mostra data, versão e contagens, e pede que se digite `RESTAURAR`;
+  - guarda o `.env` atual e coloca o do backup;
+  - recria o banco, ajusta as senhas do banco, aplica migrations mais novas e sobe tudo;
+  - roda o `secrets:check`.
+- `--public-host <IP>` prepara uma VM de teste:
+  - painel em HTTP nesse IP;
+  - **backup automático desligado**, para a VM de teste não gravar nem apagar arquivos no destino de produção.
+- O registro do próprio backup restaurado (que foi copiado "em andamento") é marcado corretamente.
+
+### Arquivos
+
+- `packages/db/migrations/0009_fase8_backup.sql` — tabela `backup_runs` (só plataforma; um pedido ativo por vez)
+- `packages/shared/src/backup.ts` — configuração, agenda no horário de Brasília, nomes e retenção
+- `apps/worker/src/backup/` (`tools.ts`, `archive.ts`, `transfer.ts`, `service.ts`) e `apps/worker/src/backup-main.ts`
+- `apps/api/src/routes/backup.ts`, `apps/web/components/backup-card.tsx`, `apps/web/components/integrations-card.tsx`
+- `Dockerfile` (alvo `backup`: pg_dump 16, gpg, lftp, ssh), `compose.yaml` (serviço `backup`, `.data/backups`)
+- `packages/db/src/secrets.ts`, `apps/api/src/cli.ts`, `scripts/rotate-secrets.sh` — senhas do backup na troca da chave de cifra
+- `scripts/restore.sh` (novo)
+- Testes: `packages/shared/test/backup.unit.test.ts` (6), `apps/api/test/backup.int.test.ts` (7), `apps/worker/test/backup.int.test.ts` (6), `apps/api/test/secrets.int.test.ts` (ampliado)
+- E2E: `e2e/backup.spec.ts`; `e2e/monitoramento.spec.ts` agora aponta para o bloco do SMTP (`integrations-smtp`), porque a seção também tem o Backup, com campos de mesmo nome
+
+### Testes no laboratório
+
+Destinos de teste: um servidor SFTP (`atmoz/sftp`), um FTP com TLS e certificado próprio, e um FTP simples.
+
+| Teste | Resultado |
+|---|---|
+| Testes automatizados | 207/207 |
+| E2E | 41/41 |
+| Aceite Fase 7 | 9/9 |
+| SFTP com senha | teste ok: pasta criada, identidade registrada; backup de 379 KB enviado |
+| SFTP com chave SSH | ok; chave com senha recusada; senha no lugar da chave → "Usuário, senha ou chave recusados" |
+| FTPS | certificado próprio com conferência → recusado com explicação; sem conferência → ok |
+| FTP | ok num servidor sem TLS; num servidor que exige TLS → "O servidor exige conexão criptografada: escolha FTPS" |
+| Mensagens de erro | servidor inexistente, porta fechada e senha errada, em português |
+| Identidade SFTP trocada | backup recusado; alerta aberto; "Aceitar nova identidade" → teste registra a nova → backup ok → alerta fechado |
+| Retenção | 2 no destino e 2 locais mantidas; a mais antiga apagada nos dois |
+| Agenda | horário vencido → roda sozinho uma vez e não repete; próximo horário exibido certo |
+| Agenda com falha | 3 tentativas com 30 min de intervalo, um alerta só; teste que falha não abre alerta de backup; alerta de 26 h abre e fecha |
+| Arquivo | abre só com a senha certa (AES-256); dump íntegro (`pg_restore --list`); `.env` idêntico ao do servidor |
+| Vazamento | nenhuma senha na API, nos logs, na auditoria nem em texto no banco |
+| **Restauração** | backup → alteração no banco → **troca de todos os segredos** → restauração: alteração desfeita, segredos de volta aos do backup, 52 chaves legíveis, login ok, câmera publicou com a chave restaurada, backup automático desligado no modo teste; 38 s |
+| Restauração com senha errada | recusada sem alterar nada |
+| Troca da chave de cifra com backup configurado | 3 senhas do backup recifradas; o backup seguinte funcionou e abriu |
+
+Três defeitos encontrados nos testes e corrigidos:
+
+- **Consulta do histórico:** tinha uma coluna ambígua e dava erro 500.
+- **"Próximo backup":** o horário exibido errava em horários da tarde.
+- **Restauração:** o registro do backup restaurado aparecia como "interrompido".
+
+### Procedimento na VM (parte 3)
+
+1. Atualizar com o bundle (`scripts/update.sh --bundle …`). Isso constrói a imagem `topcam/backup` (a primeira vez leva alguns minutos) e aplica a migração 0009.
+2. Conferir em Configurações → Integrações → Backup: deve aparecer "Serviço de backup ativo".
+3. **Destino real:** preencher, salvar, "Testar conexão" e "Fazer backup agora". Anote a identidade do servidor SFTP que aparecer.
+4. **Guardar a senha do backup fora do servidor.**
+5. Conferir o arquivo na VM, sem restaurar nada:
+   ```
+   scripts/restore.sh --file .data/backups/<arquivo> --check
+   ```
+6. Ligar "Backup automático diário".
+7. O teste de restauração numa VM limpa fica na parte 4.

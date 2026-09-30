@@ -67,7 +67,8 @@ test.describe("monitoramento", () => {
     test.skip((page.viewportSize()?.width ?? 0) < 1024, "só no computador");
     await loginAdmin(page);
     await page.goto("/configuracoes");
-    const card = page.getByTestId("integrations");
+    // O bloco do SMTP (a seção Integrações também tem o Backup, com campos de mesmo nome).
+    const card = page.getByTestId("integrations-smtp");
     await expect(card.getByRole("heading", { name: "E-mail (SMTP) — alertas" })).toBeVisible();
     await card.getByLabel("Servidor SMTP").fill("");
     await card.getByRole("button", { name: "Preencher para Gmail" }).click();

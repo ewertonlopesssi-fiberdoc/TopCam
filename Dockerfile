@@ -54,6 +54,15 @@ USER node
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "apps/api/dist/server.js"]
 
+# ---------------------------------------------------------------- backup (Fase 8)
+# Mesma aplicação + ferramentas: pg_dump/pg_restore (PostgreSQL 16), gpg, lftp (SFTP/FTPS/FTP)
+# e o cliente SSH. Só o serviço de backup usa esta imagem.
+FROM runtime AS backup
+USER root
+RUN apk add --no-cache postgresql16-client gnupg lftp openssh-client tar
+USER node
+CMD ["node", "apps/worker/dist/backup-main.js"]
+
 # ---------------------------------------------------------------- painel web (Next.js)
 FROM deps AS web-build
 ENV NEXT_TELEMETRY_DISABLED=1

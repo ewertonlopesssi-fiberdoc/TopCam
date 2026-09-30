@@ -1,4 +1,4 @@
-import { decryptStreamKey, encryptStreamKey } from "@topcam/shared";
+import { BACKUP_ENCRYPTED_FIELDS, decryptStreamKey, encryptStreamKey } from "@topcam/shared";
 import type { PoolClient } from "pg";
 
 /**
@@ -6,7 +6,8 @@ import type { PoolClient } from "pg";
  *
  * Recifra, numa única transação do chamador, tudo o que o banco guarda cifrado:
  *   - cameras.stream_key_enc (inclusive câmeras excluídas/transferidas);
- *   - a senha do SMTP em system_settings 'integrations.smtp' (password_enc).
+ *   - a senha do SMTP em system_settings 'integrations.smtp' (password_enc);
+ *   - as senhas do backup em 'integrations.backup' (destino, chave SSH e senha do arquivo).
  *
  * Cada valor é aberto com a chave antiga, cifrado com a nova e conferido de volta.
  * Valor que já abre com a chave nova é mantido (repetir o comando é seguro).
@@ -16,6 +17,9 @@ export interface ReencryptResult {
   cameras: number;
   camerasAlreadyNew: number;
   smtp: "reencrypted" | "already_new" | "none";
+  /** Campos do backup recifrados (e já na chave nova). */
+  backup: number;
+  backupAlreadyNew: number;
 }
 
 function recipher(payload: string, oldKey: Buffer, newKey: Buffer, what: string) {
@@ -41,7 +45,13 @@ export async function reencryptSecrets(
   newKey: Buffer,
 ): Promise<ReencryptResult> {
   if (oldKey.equals(newKey)) throw new Error("a chave nova é igual à antiga");
-  const out: ReencryptResult = { cameras: 0, camerasAlreadyNew: 0, smtp: "none" };
+  const out: ReencryptResult = {
+    cameras: 0,
+    camerasAlreadyNew: 0,
+    smtp: "none",
+    backup: 0,
+    backupAlreadyNew: 0,
+  };
 
   const cams = await c.query<{ id: string; code: string; stream_key_enc: string }>(
     "SELECT id, code, stream_key_enc FROM cameras WHERE stream_key_enc IS NOT NULL FOR UPDATE",
@@ -71,6 +81,27 @@ export async function reencryptSecrets(
       );
       out.smtp = "reencrypted";
     }
+  }
+  const bkp = await c.query<{ value: Record<string, string | null> }>(
+    "SELECT value FROM system_settings WHERE key = 'integrations.backup' FOR UPDATE",
+  );
+  const value = bkp.rows[0]?.value;
+  if (value) {
+    const next = { ...value };
+    for (const f of BACKUP_ENCRYPTED_FIELDS) {
+      const v = value[f];
+      if (!v) continue;
+      const r = recipher(v, oldKey, newKey, `backup (${f})`);
+      if (r === null) out.backupAlreadyNew++;
+      else {
+        next[f] = r;
+        out.backup++;
+      }
+    }
+    if (out.backup)
+      await c.query("UPDATE system_settings SET value = $1 WHERE key = 'integrations.backup'", [
+        JSON.stringify(next),
+      ]);
   }
   return out;
 }

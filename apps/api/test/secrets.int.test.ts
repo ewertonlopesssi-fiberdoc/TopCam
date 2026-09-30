@@ -28,6 +28,18 @@ beforeAll(async () => {
       }),
     ],
   );
+  await ownerQuery(
+    db,
+    `INSERT INTO system_settings (key, value) VALUES ('integrations.backup', $1)`,
+    [
+      JSON.stringify({
+        host: "b.teste",
+        password_enc: encryptSecret("senha-destino", oldKey),
+        private_key_enc: null,
+        passphrase_enc: encryptSecret("senha-do-backup-longa", oldKey),
+      }),
+    ],
+  );
   // Uma câmera excluída também precisa ser recifrada.
   await ownerQuery(db, "UPDATE cameras SET deleted_at = now() WHERE code = 'CAM-002'");
   const rows = await ownerQuery<{ id: string; stream_key_enc: string }>(
@@ -64,7 +76,7 @@ describe("recifragem da chave de cifra", () => {
     expect(await encRows()).toEqual(before);
   });
 
-  it("recifra todas as câmeras (inclusive excluídas) e a senha do SMTP, mesmo conteúdo", async () => {
+  it("recifra câmeras (inclusive excluídas), senha do SMTP e senhas do backup, mesmo conteúdo", async () => {
     const r = await withScope(pool, PLATFORM, (c) => reencryptSecrets(c, oldKey, newKey));
     expect(r.cameras).toBe(plainBefore.size);
     expect(r.smtp).toBe("reencrypted");
@@ -73,11 +85,28 @@ describe("recifragem da chave de cifra", () => {
       expect(() => decryptStreamKey(row.stream_key_enc, oldKey)).toThrow();
     }
     expect(decryptStreamKey(await smtpEnc(), newKey)).toBe("senha-smtp");
+    expect(r.backup).toBe(2);
+    const b = (
+      await ownerQuery<{ value: Record<string, string | null> }>(
+        db,
+        "SELECT value FROM system_settings WHERE key = 'integrations.backup'",
+      )
+    )[0]!.value;
+    expect(decryptStreamKey(b.password_enc!, newKey)).toBe("senha-destino");
+    expect(decryptStreamKey(b.passphrase_enc!, newKey)).toBe("senha-do-backup-longa");
+    expect(b.private_key_enc).toBeNull();
+    expect(b.host).toBe("b.teste");
   });
 
   it("repetir é seguro: o que já está na chave nova fica como está", async () => {
     const r = await withScope(pool, PLATFORM, (c) => reencryptSecrets(c, oldKey, newKey));
-    expect(r).toEqual({ cameras: 0, camerasAlreadyNew: plainBefore.size, smtp: "already_new" });
+    expect(r).toEqual({
+      cameras: 0,
+      camerasAlreadyNew: plainBefore.size,
+      smtp: "already_new",
+      backup: 0,
+      backupAlreadyNew: 2,
+    });
   });
 
   it("recusa chave nova igual à antiga", async () => {
