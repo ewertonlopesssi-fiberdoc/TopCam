@@ -52,8 +52,14 @@ test.describe("usuários — senha e acesso", () => {
     expect(r.status()).toBe(200);
     expect((await r.json()).user.mustChangePassword).toBe(false);
 
-    // Alterar senha pela lista (em branco = gerada, com troca obrigatória).
+    // Na edição, o cliente aparece (só leitura).
     await page.getByPlaceholder("Pesquisar nome ou e-mail…").fill(email);
+    await page.getByRole("button", { name: `Editar Senha ${stamp}` }).click();
+    await expect(page.getByRole("dialog").getByLabel("Cliente")).toHaveValue("Empresa Alfa");
+    await expect(page.getByRole("dialog").getByLabel("Cliente")).toBeDisabled();
+    await page.getByRole("dialog").getByRole("button", { name: "Cancelar" }).click();
+
+    // Alterar senha pela lista (em branco = gerada, com troca obrigatória).
     await page.getByRole("button", { name: `Alterar senha de Senha ${stamp}` }).click();
     const modal = page.getByRole("dialog");
     await expect(modal.getByLabel("Exigir troca de senha no primeiro acesso")).toBeChecked();

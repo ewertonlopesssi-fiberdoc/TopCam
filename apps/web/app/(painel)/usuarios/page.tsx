@@ -243,6 +243,16 @@ function UserForm({
               ))}
           </select>
         </Field>
+        {user && (
+          <Field label="Cliente" hint="O cliente não pode ser alterado depois do cadastro.">
+            <input
+              className="input"
+              value={user.tenantName ?? "Plataforma (equipe)"}
+              disabled
+              readOnly
+            />
+          </Field>
+        )}
         {!user && selected?.scope === "tenant" && auth.isPlatform && (
           <Field label="Cliente *">
             <select
