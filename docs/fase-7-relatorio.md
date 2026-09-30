@@ -6,7 +6,11 @@
 - **150 testes automatizados** aprovados (lint + unidade + integração com banco real e servidor SMTP real de teste);
 - **E2E** das telas Dashboard, Eventos e Alertas, Relatórios e Integrações aprovado em 1440, 768 e 390 px, junto com o E2E das fases anteriores (32 aprovados, os demais dependem de vídeo real e ficam para a VM).
 
-**VM: pendente.** Falta rodar o aceite lá e configurar o Gmail (passo a passo abaixo).
+**VM (29/09): 9/9** (commit `ca2ab30`).
+- M1 a M7 passaram no aceite das 13:49. O alerta de câmera sem sinal saiu em 38 s e o e-mail em 40 s, dentro do limite de 60 s. Ficou mais lento que aqui porque o disco da VM estava travando.
+- M8 falhou nessa rodada: os testes de integração estouraram o tempo de preparação, com o disco em **espera de 66%** e escrita de até **80 s** (armazenamento do Proxmox, SSDs A400 saturados pelo EDGE).
+- Com o disco normal, os testes rodaram de novo sozinhos: **150/150 em 2 min 15 s**.
+- Falta configurar o Gmail no painel (passo a passo abaixo).
 
 ## Decisões nesta fase
 
