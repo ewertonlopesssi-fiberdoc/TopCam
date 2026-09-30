@@ -34,6 +34,9 @@ export const CAMERA_EVENT_TYPES = [
   "system_disk",
   // alertas e notificações (Fase 7)
   "alert_notified",
+  // segurança (Fase 8)
+  "rate_limited",
+  "publish_ip_blocked",
 ] as const;
 
 export type CameraEventType = (typeof CAMERA_EVENT_TYPES)[number];

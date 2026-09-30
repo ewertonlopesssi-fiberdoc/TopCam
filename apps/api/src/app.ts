@@ -6,6 +6,7 @@ import type { Env } from "./env.js";
 import cookie from "@fastify/cookie";
 import { HttpError, sendError } from "./lib/http.js";
 import { authPlugin } from "./plugins/auth.js";
+import { rateLimitPlugin } from "./plugins/ratelimit.js";
 import { adminRoutes } from "./routes/admin.js";
 import { storageRoutes } from "./routes/storage.js";
 import { integrationRoutes } from "./routes/integrations.js";
@@ -56,6 +57,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await app.register(cookie);
   await authPlugin(app);
+  await rateLimitPlugin(app);
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) return sendError(reply, err);

@@ -118,6 +118,13 @@ function checkRole(req: FastifyRequest, role: string, tenantId: string | null): 
 export async function userRoutes(app: FastifyInstance): Promise<void> {
   const read = { preHandler: app.requirePermission("users.read") };
   const write = { preHandler: app.requirePermission("users.write") };
+  // Envio de acesso (senha nova, e-mail) e cadastro: limites por quem executa.
+  const sendAccess = {
+    preHandler: [app.requirePermission("users.write"), app.rateLimit("send-access", 30, 3600)],
+  };
+  const create = {
+    preHandler: [app.requirePermission("users.write"), app.rateLimit("user-create", 120, 3600)],
+  };
   const perms = { preHandler: app.requirePermission("permissions.write") };
   const emailAccess = accessMailer(app);
 
@@ -163,7 +170,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     return { ...p, items: p.items.map((r) => withLabel(r as { role: string })) };
   });
 
-  app.post("/api/v1/users", write, async (req, reply) => {
+  app.post("/api/v1/users", create, async (req, reply) => {
     const b = parseBody(createBody, req.body);
     const tenantId = isPlatform(req) ? (b.tenantId ?? null) : req.user!.tenantId;
     const role = checkRole(req, b.role, tenantId);
@@ -309,43 +316,47 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  app.post<{ Params: { id: string } }>("/api/v1/users/:id/reset-password", write, async (req) => {
-    const id = parseBody(uuid, req.params.id);
-    const b = parseBody(resetBody, req.body ?? {});
-    if (id === req.user!.id)
-      throw forbidden("Para trocar a sua senha, use Configurações → Minha conta");
-    const pw = choosePassword(b);
-    const hashed = await hashPassword(pw.password);
-    const target = await db(app, req, async (c) => {
-      const target = await loadTarget(c, req, id);
-      if (!assignableRoles(req.user!.role).includes(target.role))
-        throw forbidden("Você não pode alterar este usuário");
-      await c.query(
-        "UPDATE users SET password_hash = $2, must_change_password = $3 WHERE id = $1",
-        [id, hashed, pw.mustChange],
-      );
-      await c.query(
-        "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
-        [id],
-      );
-      await audit(c, req, "user.password_reset", {
-        tenantId: target.tenantId,
-        entityType: "user",
-        entityId: id,
-        data: {
-          password: pw.generated ? "gerada" : "definida pelo administrador",
-          mustChangePassword: pw.mustChange,
-        },
+  app.post<{ Params: { id: string } }>(
+    "/api/v1/users/:id/reset-password",
+    sendAccess,
+    async (req) => {
+      const id = parseBody(uuid, req.params.id);
+      const b = parseBody(resetBody, req.body ?? {});
+      if (id === req.user!.id)
+        throw forbidden("Para trocar a sua senha, use Configurações → Minha conta");
+      const pw = choosePassword(b);
+      const hashed = await hashPassword(pw.password);
+      const target = await db(app, req, async (c) => {
+        const target = await loadTarget(c, req, id);
+        if (!assignableRoles(req.user!.role).includes(target.role))
+          throw forbidden("Você não pode alterar este usuário");
+        await c.query(
+          "UPDATE users SET password_hash = $2, must_change_password = $3 WHERE id = $1",
+          [id, hashed, pw.mustChange],
+        );
+        await c.query(
+          "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+          [id],
+        );
+        await audit(c, req, "user.password_reset", {
+          tenantId: target.tenantId,
+          entityType: "user",
+          entityId: id,
+          data: {
+            password: pw.generated ? "gerada" : "definida pelo administrador",
+            mustChangePassword: pw.mustChange,
+          },
+        });
+        return target;
       });
-      return target;
-    });
-    const mail = b.sendEmail ? await emailAccess(req, target, pw.password, pw.mustChange) : null;
-    return {
-      ...(pw.generated ? { temporaryPassword: pw.password } : {}),
-      mustChangePassword: pw.mustChange,
-      mail,
-    };
-  });
+      const mail = b.sendEmail ? await emailAccess(req, target, pw.password, pw.mustChange) : null;
+      return {
+        ...(pw.generated ? { temporaryPassword: pw.password } : {}),
+        mustChangePassword: pw.mustChange,
+        mail,
+      };
+    },
+  );
 
   // ------------------------------------------------------------------ permissões por câmera
   app.get<{ Params: { id: string } }>("/api/v1/users/:id/camera-permissions", read, async (req) => {

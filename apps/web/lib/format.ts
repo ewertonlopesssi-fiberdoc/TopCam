@@ -186,6 +186,8 @@ export const ALERT_RULES: Record<string, string> = {
 export const EVENT_LABELS: Record<string, string> = {
   publish_authorized: "Transmissão autorizada",
   auth_rejected: "Chave recusada",
+  publish_ip_blocked: "IP bloqueado (chaves erradas)",
+  rate_limited: "Limite de requisições",
   publish_denied: "Transmissão negada",
   duplicate_publish_rejected: "Transmissão duplicada recusada",
   stream_online: "Câmera no ar",

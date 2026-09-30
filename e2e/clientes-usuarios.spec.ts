@@ -37,6 +37,8 @@ test.describe("clientes e câmeras", () => {
 
     await panel.getByRole("link", { name: "Abrir em Usuários" }).click();
     await expect(page).toHaveURL(/\/usuarios\?tenantId=/);
+    // A lista é paginada (10); com usuários de rodadas anteriores, pesquisa pelo e-mail.
+    await page.getByPlaceholder("Pesquisar nome ou e-mail…").fill(`parente${stamp}`);
     await expect(page.getByRole("table").getByText(`parente${stamp}@e2e.test`)).toBeVisible();
   });
 

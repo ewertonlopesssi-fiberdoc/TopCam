@@ -38,6 +38,10 @@ x-app: &app
     COOKIE_SECURE: ${COOKIE_SECURE:-false}
     # Endereço do painel nos e-mails (alertas e dados de acesso).
     PANEL_URL: ${PANEL_URL:-http://${PUBLIC_HOST:-localhost}}
+    # Limites (Fase 8): requisições/min por IP (0 desliga) e bloqueio de quem erra chave de câmera.
+    RATE_LIMIT_API_PER_MIN: ${RATE_LIMIT_API_PER_MIN:-1200}
+    PUBLISH_BADKEY_MAX: ${PUBLISH_BADKEY_MAX:-20}
+    PUBLISH_BADKEY_BLOCK_S: ${PUBLISH_BADKEY_BLOCK_S:-1800}
 
 services:
   postgres:

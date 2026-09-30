@@ -5,6 +5,7 @@ import {
   insertCameraEvent,
   markSegmentComplete,
   normalizeIp,
+  raiseAlert,
   transitionCamera,
   upsertSegmentStart,
   withScope,
@@ -84,6 +85,49 @@ export async function mediamtxRoutes(app: FastifyInstance): Promise<void> {
     }
   }
 
+  /**
+   * Chave/caminho errado vindo de um IP (Fase 8). Passou de PUBLISH_BADKEY_MAX em 10 min →
+   * bloqueio por PUBLISH_BADKEY_BLOCK_S: as tentativas erradas desse IP são recusadas sem
+   * gravar eventos. Câmeras com a chave certa no mesmo IP continuam entrando (o bloqueio
+   * só atua quando a chave não confere).
+   * Retorna true se o IP já estava bloqueado (não registrar a tentativa).
+   */
+  async function badKeyStrike(rawIp: string): Promise<boolean> {
+    const ip = normalizeIp(rawIp) ?? rawIp;
+    const blockKey = `topcam:rl:badkey-block:${ip}`;
+    try {
+      if (await redis.exists(blockKey)) return true;
+      const n = await redis.incr(`topcam:rl:badkey:${ip}`);
+      if (n === 1) await redis.expire(`topcam:rl:badkey:${ip}`, 600);
+      if (n < env.PUBLISH_BADKEY_MAX) return false;
+      if ((await redis.set(blockKey, "1", "EX", env.PUBLISH_BADKEY_BLOCK_S, "NX")) !== "OK")
+        return true;
+    } catch {
+      return false;
+    }
+    const minutes = Math.round(env.PUBLISH_BADKEY_BLOCK_S / 60);
+    app.log.warn({ ip, tentativas: env.PUBLISH_BADKEY_MAX }, "IP bloqueado por chaves erradas");
+    await withScope(pool, PLATFORM, async (c) => {
+      await insertCameraEvent(c, {
+        tenantId: null,
+        cameraId: null,
+        type: "publish_ip_blocked",
+        severity: "warning",
+        message: `${env.PUBLISH_BADKEY_MAX} chaves de câmera erradas em 10 min: tentativas deste IP recusadas por ${minutes} min`,
+        data: { attempts: env.PUBLISH_BADKEY_MAX, block_s: env.PUBLISH_BADKEY_BLOCK_S },
+        sourceIp: ip,
+      });
+      await raiseAlert(c, {
+        dedupKey: `security.publish_ip_blocked:${ip}`,
+        rule: "security.publish_ip_blocked",
+        severity: "warning",
+        title: `IP ${ip} bloqueado por tentar chaves de câmera erradas`,
+        details: { ip, attempts: env.PUBLISH_BADKEY_MAX, block_minutes: minutes },
+      });
+    }).catch((err) => app.log.error({ err }, "falha ao registrar bloqueio de IP"));
+    return false;
+  }
+
   function deny(reply: FastifyReply) {
     return reply.code(401).send({ error: "unauthorized" });
   }
@@ -128,6 +172,7 @@ export async function mediamtxRoutes(app: FastifyInstance): Promise<void> {
     // ------------------------------------------------------------- publicação
     const key = streamKeyFromPath(body.path);
     if (!key) {
+      if (await badKeyStrike(body.ip)) return deny(reply);
       if (
         await firstInWindow(
           `badpath:${fingerprint(body.path)}:${body.ip}`,
@@ -156,6 +201,7 @@ export async function mediamtxRoutes(app: FastifyInstance): Promise<void> {
     const keyHash = hashStreamKey(key);
     const camera = await withScope(pool, PLATFORM, (c) => findCameraByKeyHash(c, keyHash));
     if (!camera) {
+      if (await badKeyStrike(body.ip)) return deny(reply);
       if (
         await firstInWindow(
           `badkey:${keyHash.slice(0, 16)}:${body.ip}`,

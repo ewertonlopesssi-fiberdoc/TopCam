@@ -184,7 +184,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ------------------------------------------------------------------ refresh
-  app.post("/api/v1/auth/refresh", async (req, reply) => {
+  // Sem login ainda: por IP. Cada abertura de página renova a sessão, então o limite é folgado.
+  const refreshLimit = { preHandler: app.rateLimit("refresh", 300, 60, { skipTrusted: true }) };
+  app.post("/api/v1/auth/refresh", refreshLimit, async (req, reply) => {
     const fromBody = (req.body as { refreshToken?: unknown } | undefined)?.refreshToken;
     const token = typeof fromBody === "string" ? fromBody : req.cookies[REFRESH_COOKIE];
     const client = typeof fromBody === "string" ? "mobile" : "web";
@@ -252,7 +254,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  app.post("/api/v1/auth/change-password", { preHandler: app.authenticate }, async (req) => {
+  const changePwd = { preHandler: [app.authenticate, app.rateLimit("change-password", 10, 900)] };
+  app.post("/api/v1/auth/change-password", changePwd, async (req) => {
     const body = parseBody(changePasswordBody, req.body);
     const user = req.user!;
     const current = await withScope(

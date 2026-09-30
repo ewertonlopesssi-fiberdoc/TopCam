@@ -6,6 +6,7 @@ import {
   findCameraByCode,
   insertAudit,
   insertCameraEvent,
+  reencryptSecrets,
   rotateStreamKey,
   withScope,
 } from "@topcam/db";
@@ -30,6 +31,8 @@ import {
  *   user:disable     --email <e-mail>      (encerra as sessões)
  *   user:delete      --email <e-mail>      (exclusão lógica; some das listas, fica na auditoria)
  *   recording:status [--tenant <slug>]     (gravações: horas disponíveis, espaço, lacunas, problemas)
+ *   secrets:reencrypt                      (Fase 8: recifra o banco; chaves pelo stdin, nunca na linha de comando)
+ *   secrets:rotated --names <grupos>       (Fase 8: auditoria da troca de segredos, sem valores)
  *
  * Os comandos de usuário servem para recuperar o acesso (ex.: único administrador
  * bloqueado) e para o script de aceite; ficam registrados na auditoria (ator "cli").
@@ -46,7 +49,10 @@ const HELP = `uso:
   user:reset-password --email <e-mail>
   user:disable        --email <e-mail>
   user:delete         --email <e-mail>
-  recording:status    [--tenant <slug>]`;
+  recording:status    [--tenant <slug>]
+  secrets:reencrypt   (lê 2 linhas do stdin: chave antiga e chave nova, base64)
+  secrets:check       (confere se tudo abre com a STREAM_KEY_ENC_KEY em uso)
+  secrets:rotated     --names <jwt,media,db,enc>   (registra a troca na auditoria)`;
 
 function need(name: string): string {
   const v = process.env[name];
@@ -66,6 +72,7 @@ const { positionals, values } = parseArgs({
     email: { type: "string" },
     name: { type: "string" },
     role: { type: "string" },
+    names: { type: "string" },
   },
 });
 
@@ -87,7 +94,104 @@ function printKey(tenant: string, code: string, key: string, raw: boolean) {
   console.log(`URL completa:     rtmp://${host}:${port}/live/${key}`);
 }
 
+async function readStdinLines(n: number): Promise<string[]> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  const lines = Buffer.concat(chunks)
+    .toString("utf8")
+    .split(/\r?\n/)
+    .map((l) => l.trim());
+  return lines.filter(Boolean).slice(0, n);
+}
+
 async function main() {
+  if (cmd === "secrets:reencrypt") {
+    const [oldB64, newB64] = await readStdinLines(2);
+    if (!oldB64 || !newB64)
+      throw new Error("informe no stdin a chave antiga e a nova (uma por linha)");
+    const oldKey = parseEncryptionKey(oldB64);
+    const newKey = parseEncryptionKey(newB64);
+    const r = await withScope(pool, PLATFORM, async (c) => {
+      const res = await reencryptSecrets(c, oldKey, newKey);
+      await insertAudit(c, {
+        tenantId: null,
+        actorType: "cli",
+        action: "secrets.reencrypted",
+        entityType: "secret",
+        entityId: "STREAM_KEY_ENC_KEY",
+        data: { cameras: res.cameras, camerasAlreadyNew: res.camerasAlreadyNew, smtp: res.smtp },
+      });
+      return res;
+    });
+    console.log(
+      `recifrado: ${r.cameras} chave(s) de câmera` +
+        (r.camerasAlreadyNew ? ` (${r.camerasAlreadyNew} já na chave nova)` : "") +
+        `; senha do SMTP: ${{ reencrypted: "recifrada", already_new: "já na chave nova", none: "não configurada" }[r.smtp]}`,
+    );
+    return;
+  }
+
+  if (cmd === "secrets:check") {
+    const r = await withScope(pool, PLATFORM, async (c) => {
+      const cams = (
+        await c.query<{ code: string; stream_key_enc: string }>(
+          "SELECT code, stream_key_enc FROM cameras WHERE stream_key_enc IS NOT NULL",
+        )
+      ).rows;
+      const smtp = (
+        await c.query<{ enc: string | null }>(
+          "SELECT value->>'password_enc' AS enc FROM system_settings WHERE key = 'integrations.smtp'",
+        )
+      ).rows[0]?.enc;
+      let ok = 0;
+      const bad: string[] = [];
+      for (const cam of cams) {
+        try {
+          decryptStreamKey(cam.stream_key_enc, encKey);
+          ok++;
+        } catch {
+          bad.push(cam.code);
+        }
+      }
+      let smtpOk: boolean | null = null;
+      if (smtp) {
+        try {
+          decryptStreamKey(smtp, encKey);
+          smtpOk = true;
+        } catch {
+          smtpOk = false;
+        }
+      }
+      return { ok, bad, smtpOk };
+    });
+    console.log(
+      `chaves de câmera legíveis: ${r.ok}; ilegíveis: ${r.bad.length}${r.bad.length ? ` (${r.bad.slice(0, 10).join(", ")})` : ""}; ` +
+        `senha do SMTP: ${r.smtpOk === null ? "não configurada" : r.smtpOk ? "legível" : "ILEGÍVEL"}`,
+    );
+    if (r.bad.length || r.smtpOk === false) process.exitCode = 1;
+    return;
+  }
+
+  if (cmd === "secrets:rotated") {
+    const names = (values.names ?? "")
+      .split(",")
+      .map((n) => n.trim())
+      .filter((n) => ["jwt", "media", "db", "enc"].includes(n));
+    if (!names.length) throw new Error("use --names com jwt, media, db e/ou enc");
+    await withScope(pool, PLATFORM, (c) =>
+      insertAudit(c, {
+        tenantId: null,
+        actorType: "cli",
+        action: "secrets.rotated",
+        entityType: "secret",
+        entityId: names.join(","),
+        data: { groups: names },
+      }),
+    );
+    console.log(`auditoria: troca de segredos registrada (${names.join(", ")})`);
+    return;
+  }
+
   if (cmd === "camera:list") {
     const rows = await withScope(
       pool,

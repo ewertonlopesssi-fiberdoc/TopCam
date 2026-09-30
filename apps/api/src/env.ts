@@ -32,13 +32,21 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32),
   ACCESS_TOKEN_TTL_S: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL_H: z.coerce.number().int().positive().default(720),
-  /** Cookie do refresh token só por HTTPS. Desligado no laboratório (HTTP); ligar na Fase 8. */
+  /** Cookie do refresh token só por HTTPS (scripts/https.sh liga junto com o HTTPS). */
   COOKIE_SECURE: z
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   LOGIN_WINDOW_S: z.coerce.number().int().positive().default(900),
+
+  // ---- limites (Fase 8)
+  /** Requisições por minuto por IP na API (0 desliga). Redes confiáveis ficam de fora. */
+  RATE_LIMIT_API_PER_MIN: z.coerce.number().int().min(0).default(1200),
+  /** Chaves de câmera erradas por IP em 10 min antes do bloqueio temporário. */
+  PUBLISH_BADKEY_MAX: z.coerce.number().int().positive().default(20),
+  /** Duração do bloqueio de quem erra chave de câmera (segundos). */
+  PUBLISH_BADKEY_BLOCK_S: z.coerce.number().int().positive().default(1800),
 
   // ---- ao vivo (Fase 3)
   /** Validade do endereço temporário do ao vivo. A sessão e a permissão são reconferidas a cada acesso. */

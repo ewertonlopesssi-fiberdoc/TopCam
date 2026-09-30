@@ -2,6 +2,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 .env
+# cópias com segredos (https.sh, rotate-secrets.sh)
+.env.*
+!.env.example
 .data/
 reports/*.md
 reports/*.log

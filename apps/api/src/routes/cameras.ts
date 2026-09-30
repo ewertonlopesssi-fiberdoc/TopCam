@@ -79,6 +79,12 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
   const read = { preHandler: app.requirePermission("cameras.read") };
   const write = { preHandler: app.requirePermission("cameras.write") };
   const keys = { preHandler: app.requirePermission("cameras.keys") };
+  const revealKey = {
+    preHandler: [app.requirePermission("cameras.keys"), app.rateLimit("stream-key", 60, 600)],
+  };
+  const rotateKey = {
+    preHandler: [app.requirePermission("cameras.keys"), app.rateLimit("rotate-key", 30, 600)],
+  };
   const serverUrl = `rtmp://${env.PUBLIC_HOST}:${env.RTMP_PUBLIC_PORT}/live`;
 
   /** Filtro de visibilidade: operador/visualizador só vê câmeras concedidas. */
@@ -393,7 +399,7 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ------------------------------------------------------------------ chave RTMP
-  app.get<{ Params: { id: string } }>("/api/v1/cameras/:id/stream-key", keys, async (req) => {
+  app.get<{ Params: { id: string } }>("/api/v1/cameras/:id/stream-key", revealKey, async (req) => {
     const id = parseBody(uuid, req.params.id);
     return db(app, req, async (c) => {
       const cur = await loadCamera(c, req, id);
@@ -420,7 +426,7 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  app.post<{ Params: { id: string } }>("/api/v1/cameras/:id/rotate-key", keys, async (req) => {
+  app.post<{ Params: { id: string } }>("/api/v1/cameras/:id/rotate-key", rotateKey, async (req) => {
     const id = parseBody(uuid, req.params.id);
     const key = await db(app, req, async (c) => {
       const cur = await loadCamera(c, req, id, true);

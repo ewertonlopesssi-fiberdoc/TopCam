@@ -136,7 +136,10 @@ export async function integrationRoutes(app: FastifyInstance): Promise<void> {
   });
 
   const testBody = z.object({ to: z.string().max(200).optional() }).strict();
-  app.post("/api/v1/integrations/smtp/test", admin, async (req) => {
+  const testLimit = {
+    preHandler: [app.requirePermission("settings.write"), app.rateLimit("smtp-test", 10, 600)],
+  };
+  app.post("/api/v1/integrations/smtp/test", testLimit, async (req) => {
     const raw = parseBody(testBody, req.body ?? {});
     const typed = raw.to?.trim() ? email.safeParse(raw.to) : null;
     if (typed && !typed.success)

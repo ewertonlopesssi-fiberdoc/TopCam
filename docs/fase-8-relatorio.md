@@ -5,7 +5,7 @@ Entregue em partes. Este documento é atualizado a cada parte.
 | Parte | Conteúdo | Situação |
 |---|---|---|
 | 1 | HTTPS (Let's Encrypt), RTMPS, firewall editável no painel | **aprovada na VM em 30/09/2026** (RTMPS pronto, ainda desligado) |
-| 2 | Limite de requisições (rate limit) e rotação de segredos com recriptografia | a fazer |
+| 2 | Limite de requisições (rate limit) e rotação de segredos com recriptografia | **implementada e testada no laboratório; aguardando aplicação na VM** |
 | 3 | Backup remoto configurável no painel (SFTP/FTPS/FTP, cifrado) | a fazer |
 | 4 | Restauração em VM limpa, testes de reinício, relatório de 7 dias, aceite | a fazer |
 
@@ -151,3 +151,111 @@ Estes pontos são validados no procedimento abaixo.
    - Configurações → Firewall do servidor mostra "Aplicado no servidor".
 
 **Se perder o SSH:** entre pelo console do Proxmox (VM 107) e rode `topcam-host reset` ou `topcam-host disable`.
+
+---
+
+## Parte 2 — Limite de requisições e rotação de segredos
+
+### Limite de requisições
+
+**Geral, por IP**
+
+- Vale para `/api/*`: 1200 requisições por minuto por IP (`RATE_LIMIT_API_PER_MIN`; 0 desliga).
+- **Ficam de fora:**
+  - `/api/v1/health` e as rotas internas `/internal/*` (servidor de mídia e gateway);
+  - loopback e `172.16.0.0/12` (rede interna 172.31.x e redes do Docker);
+  - as redes cadastradas em Configurações → Firewall. A lista é relida a cada minuto.
+- **Ao estourar:**
+  - resposta 429 "Muitas solicitações deste endereço. Aguarde N segundos…", com `Retry-After`;
+  - um evento "Limite de requisições" na tela Eventos, no máximo um a cada 10 minutos por IP.
+
+**Por ação sensível**
+
+A chave do limite é o usuário logado; sem login, o IP.
+
+| Ação | Limite |
+|---|---|
+| Renovação de sessão | 300/min por IP; redes confiáveis ficam de fora |
+| Troca da própria senha | 10 a cada 15 min |
+| Alterar senha / enviar acesso | 30 por hora |
+| Cadastro de usuário | 120 por hora |
+| Exibir chave de câmera | 60 a cada 10 min |
+| Trocar chave de câmera | 30 a cada 10 min |
+| E-mail de teste | 10 a cada 10 min |
+
+O login mantém o limite que já existia: 5 tentativas por e-mail e 20 por IP.
+
+**Chave de câmera errada**
+
+- **Quando bloqueia:** depois de 20 chaves ou caminhos errados em 10 minutos, vindos do mesmo IP (`PUBLISH_BADKEY_MAX`).
+- **O que o bloqueio faz:** por 30 minutos (`PUBLISH_BADKEY_BLOCK_S`), as tentativas erradas desse IP são recusadas sem gravar eventos.
+- **O que fica registrado:** um evento "IP bloqueado (chaves erradas)" e um alerta `security.publish_ip_blocked:<ip>`, resolvido manualmente na tela Alertas.
+- **Câmeras não são afetadas:** câmeras com a chave certa, mesmo atrás do mesmo IP (CGNAT), continuam entrando. O bloqueio só atua quando a chave não confere.
+
+### Rotação de segredos
+
+`scripts/rotate-secrets.sh` troca os segredos por grupo:
+
+| Grupo | Segredos | Efeito |
+|---|---|---|
+| `--jwt` | `JWT_SECRET` | logins continuam (as sessões não dependem dele); quem estiver vendo ao vivo ou gravação reabre o vídeo |
+| `--media` | `MEDIA_HOOK_SECRET`, `MEDIA_READ_PASSWORD`, `MEDIA_GATEWAY_TOKEN` | o servidor de mídia reinicia; câmeras reconectam em segundos |
+| `--db` | `POSTGRES_PASSWORD`, `APP_DB_PASSWORD` | o banco reinicia (alguns segundos) |
+| `--enc` | `STREAM_KEY_ENC_KEY` | recifra no banco as chaves das câmeras (inclusive excluídas/transferidas) e a senha do SMTP |
+
+`--all` troca os quatro grupos.
+
+**Segurança da troca:**
+
+- Guarda cópia do `.env` antes (`.env.antes-rotacao.<data>`, só root lê). Ao final, pede para apagá-la depois de conferir.
+- Os segredos nunca aparecem na tela nem na linha de comando: as chaves vão pelo stdin. A auditoria (`secrets.rotated`, `secrets.reencrypted`) registra só os grupos.
+- **Recifragem (`--enc`):**
+  - roda numa transação única, com o worker parado;
+  - antes de mexer no banco, a chave nova é guardada em `.env.rotacao-pendente`;
+  - se algo falhar, tudo é desfeito, inclusive a senha do dono do banco, e o `.env` não muda;
+  - repetir é seguro: o que já está na chave nova fica como está.
+- **Conferência:** no final, `secrets:check` confirma que todas as chaves abrem com a chave nova.
+- **As chaves RTMP das câmeras não mudam.** A troca delas continua sendo câmera por câmera, no painel.
+
+Novos comandos da CLI da API: `secrets:reencrypt`, `secrets:check` e `secrets:rotated`.
+
+### Arquivos
+
+- `apps/api/src/plugins/ratelimit.ts` (novo), `apps/api/src/lib/ratelimit.ts`
+- `apps/api/src/routes/mediamtx.ts` — bloqueio por chave errada
+- rotas com limite: `auth.ts`, `users.ts`, `cameras.ts`, `integrations.ts`
+- `apps/api/src/env.ts`, `compose.yaml`, `.env.example` — `RATE_LIMIT_API_PER_MIN`, `PUBLISH_BADKEY_MAX`, `PUBLISH_BADKEY_BLOCK_S`
+- `packages/db/src/secrets.ts` (novo) — `reencryptSecrets`
+- `apps/api/src/cli.ts` — `secrets:*`
+- `scripts/rotate-secrets.sh` (novo)
+- `packages/shared/src/events.ts`, `apps/web/lib/format.ts` — eventos `rate_limited` e `publish_ip_blocked`
+- Testes: `apps/api/test/ratelimit.int.test.ts` (6) e `apps/api/test/secrets.int.test.ts` (4)
+- E2E: `e2e/clientes-usuarios.spec.ts` agora pesquisa pelo e-mail (a lista paginada falhava com dados acumulados)
+
+### Testes no laboratório
+
+| Teste | Resultado |
+|---|---|
+| Testes automatizados | 188/188 (10 novos) |
+| E2E | 40/40 |
+| Lint, tipos, formatação | ok |
+| Aceite Fase 2 (login, sessões, permissões) | 12/12 |
+| Limite geral | 429 em português com Retry-After; um evento só; outro IP não é afetado; health, rede interna, loopback e redes do firewall não são limitados |
+| Limite por ação | troca de senha: 11ª tentativa → 429 |
+| Chave errada | 3 erros (limite de teste) → bloqueio, evento e alerta; tentativas seguintes não gravam eventos; câmera com chave certa no mesmo IP entra (200); outro IP não é afetado |
+| Recifragem | chave errada → erro e nada muda; recifra todas as câmeras (inclusive excluídas) e o SMTP; repetir é seguro |
+| `rotate-secrets.sh --all` no ambiente completo | 29 s, todos os serviços saudáveis |
+| Depois da troca | os 7 segredos mudaram; 47 chaves legíveis; token antigo → 401; a sessão antiga renova (200); a mesma chave de câmera no painel; a câmera publicou com a mesma chave e ficou ao vivo; senhas antigas do banco recusadas e novas aceitas pela rede; auditoria só com os grupos |
+| Falha simulada (`--db --enc` com chave errada no `.env`) | recifragem desfeita, senha do dono revertida, `.env` intacto, worker religado |
+
+### Procedimento na VM (parte 2)
+
+1. Atualizar com o bundle (`scripts/update.sh --bundle …`). Os limites passam a valer na hora.
+2. Conferir o painel normalmente, pela rede interna e pelo 4G.
+3. **Rotação** (recomendada uma vez agora, porque os segredos atuais passaram por testes e cópias):
+   ```
+   scripts/rotate-secrets.sh --all
+   ```
+   Digite `SIM` para confirmar. Leva cerca de 30 s. Depois:
+   - confira painel, ao vivo e câmeras;
+   - apague a cópia com `rm .env.antes-rotacao.*`.
