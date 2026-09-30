@@ -52,7 +52,11 @@ test.describe("fluxo do administrador e do visualizador", () => {
     const dlg = page.getByRole("dialog", { name: "Novo cliente" });
     await dlg.getByLabel("Nome *").fill(cliente);
     await dlg.getByLabel("E-mail de contato").fill(`contato${stamp}@e2e.test`);
+    // O acesso do cliente (administrador) é criado junto, com o e-mail de contato.
+    await expect(dlg.getByLabel("E-mail de acesso *")).toHaveValue(`contato${stamp}@e2e.test`);
     await dlg.getByRole("button", { name: "Salvar" }).click();
+    await expect(page.getByTestId("temp-password")).toBeVisible();
+    await page.getByRole("button", { name: "Entendi" }).click();
     await page.getByPlaceholder("Pesquisar cliente…").fill(cliente);
     const row = page.locator("tr", { hasText: cliente });
     await expect(row).toBeVisible();

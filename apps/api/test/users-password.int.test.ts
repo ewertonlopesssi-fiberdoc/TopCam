@@ -358,3 +358,77 @@ describe("envio de usuário e senha por e-mail", () => {
     expect(g.user.id).toBeTruthy();
   });
 });
+
+describe("cadastro de cliente com o acesso do cliente", () => {
+  const tenantBody = (over: Record<string, unknown> = {}) => ({
+    name: `Casa ${Math.random().toString(36).slice(2, 7)}`,
+    planCode: "basico",
+    contactName: "Ana Souza",
+    contactEmail: "ana@casa.test",
+    ...over,
+  });
+
+  it("cria cliente e administrador juntos, com senha digitada e envio por e-mail", async () => {
+    inbox.length = 0;
+    const r = await api(admin).post(
+      "/api/v1/tenants",
+      tenantBody({ admin: { email: "ana@casa.test", password: "AnaSouza26", sendEmail: true } }),
+    );
+    expect(r.statusCode).toBe(201);
+    const body = r.json();
+    expect(body.admin.temporaryPassword).toBeUndefined();
+    expect(body.admin.mustChangePassword).toBe(false);
+    expect(body.admin.mail.sent).toBe(true);
+    expect(inbox[0]!.to).toBe("ana@casa.test");
+    expect(inbox[0]!.body).toContain("Senha: AnaSouza26");
+    const t = await login("ana@casa.test", "AnaSouza26");
+    const me = (await api(t).get("/api/v1/auth/me")).json();
+    expect(me.role).toBe("tenant_admin");
+    expect(me.tenant.id).toBe(body.id);
+    expect(me.name).toBe("Ana Souza");
+  });
+
+  it("e-mail já usado: nada é criado (nem o cliente)", async () => {
+    const name = "Casa Duplicada";
+    const r = await api(admin).post(
+      "/api/v1/tenants",
+      tenantBody({ name, admin: { email: "ana@casa.test", password: "Outra2026x" } }),
+    );
+    expect(r.statusCode).toBe(409);
+    const n = await ownerQuery<{ n: number }>(
+      db,
+      "SELECT count(*)::int AS n FROM tenants WHERE name = $1",
+      [name],
+    );
+    expect(n[0]!.n).toBe(0);
+  });
+
+  it("senha fora da regra: recusa sem criar o cliente", async () => {
+    const name = "Casa Senha Fraca";
+    const r = await api(admin).post(
+      "/api/v1/tenants",
+      tenantBody({ name, admin: { email: "fraca@casa.test", password: "semnumero" } }),
+    );
+    expect(r.statusCode).toBe(400);
+    const n = await ownerQuery<{ n: number }>(
+      db,
+      "SELECT count(*)::int AS n FROM tenants WHERE name = $1",
+      [name],
+    );
+    expect(n[0]!.n).toBe(0);
+  });
+
+  it("sem senha: gera a temporária com troca obrigatória; sem admin: só o cliente", async () => {
+    const g = await api(admin).post(
+      "/api/v1/tenants",
+      tenantBody({ admin: { email: "gerada@casa.test" } }),
+    );
+    expect(g.statusCode).toBe(201);
+    expect(validatePassword(g.json().admin.temporaryPassword)).toBeNull();
+    expect(g.json().admin.mustChangePassword).toBe(true);
+    const only = await api(admin).post("/api/v1/tenants", tenantBody());
+    expect(only.statusCode).toBe(201);
+    expect(only.json().admin).toBeUndefined();
+    expect(only.json().userCount).toBe(0);
+  });
+});

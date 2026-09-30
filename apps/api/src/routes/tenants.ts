@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { hashPassword } from "@topcam/shared";
+import { accessMailer, choosePassword } from "../lib/access.js";
 import { audit } from "../lib/audit.js";
 import { db, effectiveTenant, paged, scheduleReconcile, slugify, wakeWorker } from "../lib/ctx.js";
 import { badRequest, conflict, notFound, pagination, parseBody, uuid } from "../lib/http.js";
@@ -38,6 +40,22 @@ const tenantBody = z.object({
   contactPhone: optText(40),
   notes: optText(2000),
   storageQuotaBytes: z.number().int().nonnegative().nullable().optional(),
+});
+
+/**
+ * Cadastro de cliente com o usuário administrador dele (opcional, no mesmo passo):
+ * e-mail de acesso, senha (em branco = gerada), troca no primeiro acesso e envio por e-mail.
+ */
+const createTenantBody = tenantBody.extend({
+  admin: z
+    .object({
+      name: z.string().trim().min(2).max(120).optional(),
+      email: z.string().trim().toLowerCase().email().max(200),
+      password: z.string().max(200).optional(),
+      mustChangePassword: z.boolean().optional(),
+      sendEmail: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 const TENANT_SELECT = `
@@ -107,8 +125,13 @@ export async function tenantRoutes(app: FastifyInstance): Promise<void> {
     return row;
   });
 
+  const emailAccess = accessMailer(app);
+
   app.post("/api/v1/tenants", write, async (req, reply) => {
-    const b = parseBody(tenantBody, req.body);
+    const b = parseBody(createTenantBody, req.body);
+    const pw = b.admin ? choosePassword(b.admin) : null;
+    const hashed = pw ? await hashPassword(pw.password) : null;
+    let admin: { id: string; name: string; email: string; tenantId: string } | null = null;
     const created = await db(app, req, async (c) => {
       const plan = (
         await c.query<{ id: string }>("SELECT id FROM plans WHERE code = $1", [b.planCode])
@@ -147,6 +170,31 @@ export async function tenantRoutes(app: FastifyInstance): Promise<void> {
         entityId: id,
         data: { name: b.name, slug, plan: b.planCode },
       });
+      // Usuário administrador do cliente, na mesma transação: se o e-mail já existir,
+      // nada é criado (nem o cliente).
+      if (b.admin && pw && hashed) {
+        if ((await c.query("SELECT 1 FROM users WHERE email = $1", [b.admin.email])).rowCount)
+          throw conflict("Já existe um usuário com o e-mail de acesso informado", "email_taken");
+        const name = b.admin.name ?? b.contactName ?? b.name;
+        const u = await c.query<{ id: string }>(
+          `INSERT INTO users (tenant_id, role_id, name, email, password_hash, must_change_password)
+           VALUES ($1, (SELECT id FROM roles WHERE key = 'tenant_admin'), $2, $3, $4, $5) RETURNING id`,
+          [id, name, b.admin.email, hashed, pw.mustChange],
+        );
+        admin = { id: u.rows[0]!.id, name, email: b.admin.email, tenantId: id };
+        await audit(c, req, "user.created", {
+          tenantId: id,
+          entityType: "user",
+          entityId: admin.id,
+          data: {
+            email: b.admin.email,
+            role: "tenant_admin",
+            password: pw.generated ? "gerada" : "definida pelo administrador",
+            mustChangePassword: pw.mustChange,
+            viaTenant: true,
+          },
+        });
+      }
       return (
         await c.query(
           `${TENANT_SELECT} FROM tenants t JOIN plans p ON p.id = t.plan_id WHERE t.id = $1`,
@@ -154,7 +202,18 @@ export async function tenantRoutes(app: FastifyInstance): Promise<void> {
         )
       ).rows[0];
     });
-    return reply.code(201).send(created);
+    if (!admin || !pw) return reply.code(201).send(created);
+    const a = admin as { id: string; name: string; email: string; tenantId: string };
+    const mail = b.admin?.sendEmail ? await emailAccess(req, a, pw.password, pw.mustChange) : null;
+    return reply.code(201).send({
+      ...created,
+      admin: {
+        user: { id: a.id, name: a.name, email: a.email },
+        ...(pw.generated ? { temporaryPassword: pw.password } : {}),
+        mustChangePassword: pw.mustChange,
+        mail,
+      },
+    });
   });
 
   app.patch<{ Params: { id: string } }>("/api/v1/tenants/:id", write, async (req) => {

@@ -17,6 +17,15 @@ import {
   useToast,
   type Column,
 } from "@/components/ui";
+import {
+  AccessResultModal,
+  PasswordFields,
+  emptyPassword,
+  passwordPayload,
+  passwordStateError,
+  type AccessInfo,
+  type PasswordState,
+} from "@/components/password-fields";
 import { api, qs, type Page } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { TENANT_STATUS, fmtBytes, fmtDateTime, pad3 } from "@/lib/format";
@@ -65,16 +74,23 @@ function TenantForm({
   open,
   tenant,
   plans,
+  mailEnabled,
   onClose,
   onSaved,
 }: {
   open: boolean;
   tenant: Tenant | null;
   plans: Plan[];
+  mailEnabled: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (access?: AccessInfo) => void;
 }) {
   const [f, setF] = useState(empty);
+  // Usuário administrador do cliente (só no cadastro): na maioria dos casos é o próprio cliente.
+  const [withAdmin, setWithAdmin] = useState(true);
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminEmailTouched, setAdminEmailTouched] = useState(false);
+  const [pw, setPw] = useState<PasswordState>(emptyPassword());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const toast = useToast();
@@ -96,7 +112,14 @@ function TenantForm({
           }
         : { ...empty, planCode: plans[0]?.code ?? "basico" },
     );
-  }, [open, tenant, plans]);
+    setWithAdmin(true);
+    setAdminEmail("");
+    setAdminEmailTouched(false);
+    setPw(emptyPassword(mailEnabled));
+  }, [open, tenant, plans, mailEnabled]);
+
+  // O e-mail de acesso acompanha o e-mail de contato até ser editado à mão.
+  const accessEmail = adminEmailTouched ? adminEmail : f.contactEmail;
 
   const set =
     (k: keyof typeof empty) =>
@@ -107,10 +130,40 @@ function TenantForm({
     setBusy(true);
     setError(null);
     try {
-      if (tenant) await api.patch(`/tenants/${tenant.id}`, f);
-      else await api.post("/tenants", f);
-      toast(tenant ? "Cliente atualizado" : "Cliente criado");
-      onSaved();
+      if (tenant) {
+        await api.patch(`/tenants/${tenant.id}`, f);
+        toast("Cliente atualizado");
+        onSaved();
+      } else if (withAdmin) {
+        const local = passwordStateError(pw);
+        if (local) throw new Error(local);
+        if (!accessEmail.trim()) throw new Error("Informe o e-mail de acesso do administrador.");
+        const p = passwordPayload(pw);
+        const r = await api.post<{
+          admin: {
+            temporaryPassword?: string;
+            mustChangePassword: boolean;
+            mail: AccessInfo["mail"];
+          };
+        }>("/tenants", {
+          ...f,
+          admin: {
+            email: accessEmail.trim(),
+            ...(f.contactName.trim().length >= 2 ? { name: f.contactName.trim() } : {}),
+            ...p,
+          },
+        });
+        onSaved({
+          email: accessEmail.trim().toLowerCase(),
+          password: r.admin.temporaryPassword,
+          mustChange: r.admin.mustChangePassword,
+          mail: r.admin.mail,
+        });
+      } else {
+        await api.post("/tenants", f);
+        toast("Cliente criado");
+        onSaved();
+      }
       onClose();
     } catch (err) {
       setError(err);
@@ -178,6 +231,40 @@ function TenantForm({
           <textarea className="input h-20 py-2" value={f.notes} onChange={set("notes")} />
         </Field>
       </div>
+      {!tenant && (
+        <section className="mt-4 space-y-3 border-t border-line pt-4" data-testid="tenant-admin">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={withAdmin}
+              onChange={(e) => setWithAdmin(e.target.checked)}
+            />
+            Criar o acesso do cliente (usuário administrador)
+          </label>
+          {withAdmin && (
+            <>
+              <Field
+                label="E-mail de acesso *"
+                hint="Usado para entrar no TopCam. Por padrão, o e-mail de contato."
+              >
+                <input
+                  className="input"
+                  type="email"
+                  value={accessEmail}
+                  onChange={(e) => (setAdminEmail(e.target.value), setAdminEmailTouched(true))}
+                />
+              </Field>
+              <PasswordFields
+                state={pw}
+                onChange={setPw}
+                mailEnabled={mailEnabled}
+                optionalLabel="Em branco: o sistema gera"
+              />
+            </>
+          )}
+        </section>
+      )}
     </Modal>
   );
 }
@@ -197,6 +284,8 @@ export default function ClientesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [viewing, setViewing] = useState<Tenant | null>(null);
   const [toggling, setToggling] = useState<Tenant | null>(null);
+  const [access, setAccess] = useState<AccessInfo | null>(null);
+  const [mailEnabled, setMailEnabled] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -218,6 +307,10 @@ export default function ClientesPage() {
     api
       .get<{ plans: Plan[] }>("/meta")
       .then((m) => setPlans(m.plans))
+      .catch(() => undefined);
+    api
+      .get<{ enabled: boolean }>("/users/mail-status")
+      .then((r) => setMailEnabled(r.enabled))
       .catch(() => undefined);
   }, []);
 
@@ -397,9 +490,19 @@ export default function ClientesPage() {
         open={formOpen}
         tenant={editing}
         plans={plans}
+        mailEnabled={mailEnabled}
         onClose={() => setFormOpen(false)}
-        onSaved={load}
+        onSaved={(a) => {
+          void load();
+          if (!a) return;
+          if (a.password || (a.mail && !a.mail.sent)) setAccess(a);
+          else
+            toast(
+              a.mail?.sent ? `Cliente criado. Acesso enviado para ${a.email}` : "Cliente criado",
+            );
+        }}
       />
+      <AccessResultModal access={access} onClose={() => setAccess(null)} />
 
       <Drawer open={!!viewing} title={viewing ? viewing.name : ""} onClose={() => setViewing(null)}>
         {viewing && (

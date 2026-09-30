@@ -89,6 +89,15 @@ Aprovado por você: o e-mail leva o usuário (o próprio e-mail) e a senha, e a 
 
 Testes: 11 novos de integração, com servidor SMTP real de teste, e ao todo **161/161**; E2E **34/34** (novo `e2e/usuarios-senha.spec.ts`).
 
+## Ajuste: cadastro de cliente já cria o acesso do cliente (30/09)
+
+- No **Novo cliente** há um bloco novo, **"Criar o acesso do cliente (usuário administrador)"**, marcado por padrão. A maioria dos clientes tem um usuário só, e ele é o administrador.
+- **E-mail de acesso:** vem do e-mail de contato, e pode ser trocado.
+- **Senha:** digitada ou gerada, com a mesma regra, a mesma opção de troca no primeiro acesso e o mesmo envio de usuário e senha por e-mail do cadastro de usuários.
+- **Tudo ou nada:** cliente e administrador são criados na mesma operação. Se o e-mail já existir ou a senha estiver fora da regra, **nada é criado, nem o cliente**. É o mesmo comportamento que a integração com o SGP vai usar.
+- Desmarcando o bloco, o cadastro funciona como antes: só o cliente.
+- Testes: 4 novos de integração (165/165 ao todo) e E2E 34/34.
+
 ## Pendências
 
 - Aceite na VM e configuração do Gmail (acima).

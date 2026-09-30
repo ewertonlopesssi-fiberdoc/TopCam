@@ -118,6 +118,7 @@ Postgres, Redis, API do MediaMTX, RTSP, HLS e a sinalização WebRTC **não** s�
 | Visualizador           | Só as câmeras liberadas para ele, somente leitura                                              |
 
 - **Câmeras → Nova Câmera** gera o código (CAM-###) e a chave exclusiva e mostra servidor, chave e URL completa para configurar a câmera. Depois, a chave só aparece em "Exibir dados de configuração" (registrado na auditoria). "Trocar chave" invalida a anterior e desconecta quem a usa.
+- **Clientes:** o **Novo cliente** já cria o **acesso do cliente**, um usuário administrador com o e-mail de acesso (por padrão, o de contato), senha digitada ou gerada e envio por e-mail. Se algo falhar, nada é criado. O bloco pode ser desmarcado.
 - **Usuários:** no cadastro, a senha pode ser **digitada** pelo administrador ou deixada em branco, e aí o sistema gera uma temporária, exibida uma única vez.
   - **Regra de senha:** mínimo de 8 caracteres, com 1 maiúscula, 1 minúscula e 1 número.
   - "Exigir troca de senha no primeiro acesso": marcada por padrão só quando a senha é gerada.

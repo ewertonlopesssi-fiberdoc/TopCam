@@ -2,6 +2,7 @@
 
 import { Eye, EyeOff } from "lucide-react";
 import { useId, useState } from "react";
+import { CopyButton, Modal } from "@/components/ui";
 
 /** Regra de senha (a mesma validada pela API). */
 export const PASSWORD_RULE =
@@ -155,5 +156,69 @@ export function PasswordFields({
         </span>
       </label>
     </div>
+  );
+}
+
+/** Resultado de uma senha definida, mostrado ao administrador. */
+export interface AccessInfo {
+  email: string;
+  /** Só quando o sistema gerou a senha (a digitada o administrador já conhece). */
+  password?: string;
+  mustChange: boolean;
+  mail: { sent: boolean; error: string | null } | null;
+}
+
+/** Quadro com a senha gerada e/ou o resultado do envio por e-mail. */
+export function AccessResultModal({
+  access,
+  onClose,
+}: {
+  access: AccessInfo | null;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      open={!!access}
+      title={access?.password ? "Senha gerada" : "Acesso"}
+      onClose={onClose}
+      footer={
+        <button className="btn-primary" onClick={onClose}>
+          Entendi
+        </button>
+      }
+    >
+      {access?.mail && (
+        <p
+          role={access.mail.sent ? "status" : "alert"}
+          className={`mb-3 rounded-lg px-3 py-2 text-sm ${access.mail.sent ? "bg-green-50 text-green-800" : "bg-red-50 text-red-700"}`}
+        >
+          {access.mail.sent
+            ? `Usuário e senha enviados por e-mail para ${access.email}.`
+            : `O e-mail não foi enviado: ${access.mail.error}`}
+        </p>
+      )}
+      {access?.password && (
+        <>
+          <p className="text-sm text-slate-700">
+            Senha de <b>{access.email}</b>. Ela <b>não será mostrada de novo</b>
+            {access.mail?.sent ? "." : ": envie ao usuário por um canal seguro."}
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <code
+              className="flex-1 rounded-lg bg-slate-100 px-3 py-2 font-mono text-base tracking-wider"
+              data-testid="temp-password"
+            >
+              {access.password}
+            </code>
+            <CopyButton value={access.password} />
+          </div>
+        </>
+      )}
+      <p className="mt-3 text-xs text-muted">
+        {access?.mustChange
+          ? "No primeiro acesso, o usuário precisará trocar a senha."
+          : "O usuário não precisará trocar a senha no primeiro acesso."}
+      </p>
+    </Modal>
   );
 }

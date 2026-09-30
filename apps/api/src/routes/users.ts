@@ -3,18 +3,16 @@ import {
   ROLE_LABELS,
   TENANT_ROLES,
   assignableRoles,
-  generateTempPassword,
   hashPassword,
   isPlatformRole,
   isRoleKey,
-  parseEncryptionKey,
-  validatePassword,
   type RoleKey,
 } from "@topcam/shared";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { audit } from "../lib/audit.js";
-import { loadSmtp, sendAccessMail, smtpReady } from "../lib/mail.js";
+import { accessMailer, choosePassword } from "../lib/access.js";
+import { loadSmtp, smtpReady } from "../lib/mail.js";
 import { db, effectiveTenant, isPlatform, paged } from "../lib/ctx.js";
 import {
   badRequest,
@@ -61,17 +59,6 @@ const patchBody = z.object({
 });
 
 const resetBody = z.object(passwordFields);
-
-/** Senha escolhida (validada) ou gerada, e se a troca no próximo acesso é obrigatória. */
-function choosePassword(b: { password?: string; mustChangePassword?: boolean }) {
-  const typed = b.password ? b.password : null;
-  if (typed) {
-    const problem = validatePassword(typed);
-    if (problem) throw badRequest(problem);
-  }
-  const password = typed ?? generateTempPassword();
-  return { password, generated: !typed, mustChange: b.mustChangePassword ?? !typed };
-}
 
 const permissionsBody = z.object({
   items: z
@@ -132,34 +119,7 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
   const read = { preHandler: app.requirePermission("users.read") };
   const write = { preHandler: app.requirePermission("users.write") };
   const perms = { preHandler: app.requirePermission("permissions.write") };
-  const encKey = parseEncryptionKey(app.deps.env.STREAM_KEY_ENC_KEY);
-  const panelUrl = () =>
-    (app.deps.env.PANEL_URL || `http://${app.deps.env.PUBLIC_HOST}`).replace(/\/$/, "");
-
-  /** Envia os dados de acesso e registra na auditoria (sem a senha). */
-  async function emailAccess(
-    req: FastifyRequest,
-    target: { id: string; name: string; email: string; tenantId: string | null },
-    password: string,
-    mustChange: boolean,
-  ): Promise<{ sent: boolean; error: string | null }> {
-    const error = await sendAccessMail(app.deps.pool, encKey, {
-      to: target.email,
-      name: target.name,
-      password,
-      mustChange,
-      panelUrl: panelUrl(),
-    });
-    await db(app, req, (c) =>
-      audit(c, req, "user.access_emailed", {
-        tenantId: target.tenantId,
-        entityType: "user",
-        entityId: target.id,
-        data: { to: target.email, ok: !error, error },
-      }),
-    );
-    return { sent: !error, error };
-  }
+  const emailAccess = accessMailer(app);
 
   // O formulário de usuários habilita "Enviar por e-mail" só com o e-mail configurado.
   app.get("/api/v1/users/mail-status", write, async () => {
