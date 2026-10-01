@@ -196,16 +196,19 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
      gravação só com movimento, alarme com horários e intervalo mínimo, marcação na linha do tempo.
      **Aplicado na produção em 01/10/2026 (aceite 8/8).** Ver `movimento-alarme-relatorio.md`.
      Notificação no app entra com o app (Fase 9); reconhecimento facial fica para o fim (hardware + LGPD).
-3. **Integração SGP** (Gateway Genérico). Decisões e pendências em `analise-integracao-sgp.md`; antes, capturar avisos reais de um cliente de teste.
-4. **Localização + mapa** (decidido fazer junto com o mapa, depois do SGP):
+3. **App mobile (Fase 9)** — antecipado em 01/10/2026: a integração SGP fica para **depois do app**.
+4. **Integração SGP** (Gateway Genérico). Decisões e pendências em `analise-integracao-sgp.md`; antes, capturar avisos reais de um cliente de teste.
+   Ao implementar: vincular os clientes e câmeras já cadastrados à mão aos contratos/serviços do SGP
+   (sem duplicar) e decidir se a senha do SGP sobrescreve a que o cliente já trocou no app.
+5. **Localização + mapa** (decidido fazer junto com o mapa, depois do SGP):
    - latitude/longitude no **cliente** e na **câmera**;
    - a câmera **herda do cliente**; se o técnico corrigir à mão, fica **"manual"** e não muda mais com o cliente; há a opção "voltar a usar a do cliente";
    - câmera nova nasce com a localização do cliente;
    - na transferência: "do cliente" pega a do destino, "manual" mantém a sua;
    - mapa com OpenStreetMap e cor pelo status;
    - se o SGP tiver coordenadas, a localização do cliente vem pela integração.
-5. **Compartilhamento de câmeras** (parentes e vizinhos) e **app mobile**.
-6. **Melhorias de movimento e alarme — depois do app pronto** (decidido em 01/10/2026):
+6. **Compartilhamento de câmeras** (parentes e vizinhos).
+7. **Melhorias de movimento e alarme — depois do app pronto** (decidido em 01/10/2026):
    - administrador do cliente ajustar o alarme e os horários (hoje só a equipe da plataforma);
    - cerca/linha virtual como tipo próprio na linha do tempo (conferir antes se o firmware da VIP 1230 FC+ tem; a ficha técnica não lista);
    - acionar a sirene da câmera pelo app (Mibo): depende de a câmera aceitar comando por protocolo aberto (ONVIF) e de um caminho até ela (agente no local ou VPN). A nuvem da Mibo não tem interface aberta.
