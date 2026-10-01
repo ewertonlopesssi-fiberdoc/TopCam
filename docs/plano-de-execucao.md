@@ -190,11 +190,11 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
    - transferência de câmera;
    - câmeras agrupadas por cliente.
 2. **Fase 8 — Segurança, backup e resiliência** (HTTPS). Pré-requisito do SGP e do app.
-   - Teste contínuo de 7 dias iniciado em **01/10/2026 às 13:22** (relatório a partir de 08/10, 13:22).
+   - Teste contínuo de 7 dias: começou em 01/10 às 13:22 e foi **reiniciado em 01/10/2026 às 14:52**, com a atualização de movimento e alarme (relatório a partir de 08/10, 14:52).
    - **Movimento e alarme** (pedido em 01/10/2026, escopo novo aprovado; muda a decisão D8): detecção de
      movimento pela câmera (aviso por e-mail, ex.: Intelbras VIP) ou pelo servidor (quadros-chave),
      gravação só com movimento, alarme com horários e intervalo mínimo, marcação na linha do tempo.
-     Pronto no laboratório; vai para a produção **depois** do teste de 7 dias. Ver `movimento-alarme-relatorio.md`.
+     **Aplicado na produção em 01/10/2026 (aceite 8/8).** Ver `movimento-alarme-relatorio.md`.
      Notificação no app entra com o app (Fase 9); reconhecimento facial fica para o fim (hardware + LGPD).
 3. **Integração SGP** (Gateway Genérico). Decisões e pendências em `analise-integracao-sgp.md`; antes, capturar avisos reais de um cliente de teste.
 4. **Localização + mapa** (decidido fazer junto com o mapa, depois do SGP):

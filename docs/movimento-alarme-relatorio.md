@@ -5,7 +5,7 @@ Pedido em 01/10/2026 e aprovado como escopo novo. Isso muda a decisão D8 do pla
 | Item | Situação |
 |---|---|
 | Laboratório | Pronto e testado |
-| Produção (VM 107) | Ainda não aplicado. Aplicar **depois** do teste de 7 dias, que começou em 01/10/2026 às 13:22 |
+| Produção (VM 107) | **Aplicado em 01/10/2026 às 14:52** (antes do fim do teste de 7 dias, por decisão do Ewe; o teste recomeçou nesse horário). **Aceite 8/8** às 15:04 (`reports/movimento-20261001-145440.md`) |
 
 ## O que foi feito
 
@@ -178,7 +178,20 @@ Os nomes dos menus variam com o firmware.
 4. **Disco.** O "uso estimado em regime" (Armazenamento) continua calculado como gravação contínua. Para câmeras por movimento, a conta fica para cima (conservadora).
 5. **Reconhecimento facial.** Fica para o fim: hardware dedicado e a parte da LGPD.
 
-## Aplicar na produção (depois do teste de 7 dias)
+## Resultado na produção (01/10/2026)
+
+| # | Resultado |
+|---|---|
+| V1 | ✅ serviço e porta 2525 |
+| V2 | ✅ e-mail com STARTTLS (certificado do domínio) e sem criptografia; avisos seguidos viraram um só movimento (tipo "pessoa") |
+| V3 | ✅ senha errada recusada |
+| V4 | ✅ 23 avisos com movimento; nenhum com a imagem parada |
+| V5 | ✅ 3 segmentos mantidos, 2 em espera de 60 min |
+| V6 | ✅ alarme decidiu todos ("sem destinatários": o cliente de teste não tem usuários) |
+| V7 | ✅ firewall do host: `tcp dport { 80, 443, 1935, 1936, 2525, 8189 }` |
+| M1 | ✅ lint e testes |
+
+## Como foi aplicado na produção
 
 1. **Relatório de 7 dias**, a partir de 08/10, depois das 13:22:
 

@@ -7,7 +7,7 @@ Entregue em partes. Este documento é atualizado a cada parte.
 | 1 | HTTPS (Let's Encrypt), RTMPS, firewall editável no painel | **aprovada na VM em 30/09/2026** (RTMPS pronto, ainda desligado) |
 | 2 | Limite de requisições (rate limit) e rotação de segredos com recriptografia | **implementada e testada no laboratório; aguardando aplicação na VM** |
 | 3 | Backup remoto configurável no painel (SFTP/FTPS/FTP, cifrado) e restauração | **implementada e testada no laboratório; aguardando aplicação na VM e o destino real** |
-| 4 | Restauração em VM limpa, testes de reinício, disco cheio, relatório de 7 dias, aceite | **aprovada em 01/10/2026** (VM de teste e produção); teste contínuo de 7 dias **iniciado em 01/10/2026 às 13:22** (retenção da TWG em 7 dias; relatório a partir de 08/10, 13:22) |
+| 4 | Restauração em VM limpa, testes de reinício, disco cheio, relatório de 7 dias, aceite | **aprovada em 01/10/2026** (VM de teste e produção); teste contínuo de 7 dias **reiniciado em 01/10/2026 às 14:52**, depois da atualização de movimento e alarme (relatório a partir de 08/10, 14:52) |
 
 ---
 
@@ -524,3 +524,4 @@ Pedido em 01/10/2026, aproveitando o espaço do HD18-TB.
 - **Observação:** o limite de retenção do plano ainda não é conferido no cadastro da câmera; ele só aparece na tela de Planos. Hoje não há conflito, porque todos os planos aceitam pelo menos 7 dias. Fica registrado para uma fase futura.
 - **Testes:** 214/214.
 - **Pacote aplicado e teste iniciado:** retenção 3/7 dias aplicada na VM 107; a TWG passou para 7 dias em 01/10/2026 às 13:22, que é o início do teste contínuo. Relatório: `scripts/report-7days.sh --since "2026-10-01 13:22"`.
+- **Teste de 7 dias reiniciado:** a atualização de movimento e alarme foi aplicada em 01/10/2026 às 14:52 (aceite 8/8). O teste conta a partir daí. Relatório: `scripts/report-7days.sh --since "2026-10-01 14:52"`, a partir de 08/10, 14:52.
