@@ -1,0 +1,11 @@
+{
+  "name": "TopCam",
+  "slug": "topcam",
+  "androidPackage": "br.com.suportinet.topcam",
+  "iosBundleId": "br.com.suportinet.topcam",
+  "apiUrl": "https://topcam.suportinet.com.br",
+  "primaryColor": "#1d63e6",
+  "darkColor": "#0f1d3a",
+  "tagline": "Monitoramento de Câmeras",
+  "supportEmail": ""
+}

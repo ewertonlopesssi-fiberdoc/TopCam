@@ -1,3 +1,5 @@
 packages:
   - "apps/*"
+  # App mobile (Expo): projeto à parte, com o próprio npm (o React Native não convive bem com o pnpm do monorepo).
+  - "!apps/mobile"
   - "packages/*"

@@ -5,3 +5,6 @@ reports
 .data
 docs
 .next
+apps/mobile/android
+apps/mobile/ios
+apps/mobile/.expo

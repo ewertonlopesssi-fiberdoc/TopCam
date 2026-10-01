@@ -17,3 +17,4 @@ next-env.d.ts
 reports/screens/
 reports/e2e-output/
 reports/*.json
+reports/apk/

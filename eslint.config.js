@@ -10,6 +10,8 @@ export default tseslint.config(
       "**/next-env.d.ts",
       "reports/**",
       ".data/**",
+      // App mobile: lint próprio (expo lint) dentro de apps/mobile.
+      "apps/mobile/**",
     ],
   },
   js.configs.recommended,
