@@ -146,14 +146,34 @@ export async function recordingRoutes(app: FastifyInstance): Promise<void> {
             videoCodec: string | null;
             audioCodec: string | null;
             holes: Array<{ from: number; to: number }> | null;
+            pruned: boolean;
           }>(
+            // Também os apagados por falta de movimento (gravação só com movimento): entram
+            // no cálculo das lacunas — não são falha de sinal — mas não na reprodução.
             `SELECT id::text, started_at AS "startedAt", ended_at AS "endedAt", duration_ms AS "durationMs",
                   size_bytes::text AS "sizeBytes", video_codec AS "videoCodec", audio_codec AS "audioCodec",
-                  holes
+                  holes, state <> 'verified' AS pruned
              FROM recording_segments
-            WHERE camera_id = $1 AND state = 'verified' AND ended_at > $2 AND started_at < $3
+            WHERE camera_id = $1 AND ended_at > $2 AND started_at < $3
+              AND (state = 'verified' OR (state IN ('deleted', 'deleting') AND deleted_reason = 'no_motion')
+                   OR (state = 'deleting' AND motion_hold))
             ORDER BY started_at
             LIMIT 20000`,
+            [id, from, to],
+          )
+        ).rows,
+    );
+    const motion = await db(
+      app,
+      req,
+      async (c) =>
+        (
+          await c.query<{ from: Date; to: Date; kind: string; source: string }>(
+            `SELECT started_at AS "from", ended_at AS "to", kind, source
+               FROM motion_events
+              WHERE camera_id = $1 AND ended_at > $2 AND started_at < $3
+              ORDER BY started_at
+              LIMIT 5000`,
             [id, from, to],
           )
         ).rows,
@@ -161,7 +181,7 @@ export async function recordingRoutes(app: FastifyInstance): Promise<void> {
     const gaps: Array<{ from: string; to: string; seconds: number; internal?: true }> = [];
     // Buracos dentro de segmentos (quadros perdidos; Fase 6).
     for (const s of segments)
-      for (const h of s.holes ?? [])
+      for (const h of s.pruned ? [] : (s.holes ?? []))
         gaps.push({
           from: new Date(s.startedAt.getTime() + h.from * 1000).toISOString(),
           to: new Date(s.startedAt.getTime() + h.to * 1000).toISOString(),
@@ -180,15 +200,33 @@ export async function recordingRoutes(app: FastifyInstance): Promise<void> {
         });
     }
     gaps.sort((a, b) => a.from.localeCompare(b.from));
+    // Trechos sem movimento (apagados de propósito), unidos para a linha do tempo.
+    const noMotion: Array<{ from: string; to: string }> = [];
+    for (const s of segments) {
+      if (!s.pruned) continue;
+      const last = noMotion.at(-1);
+      if (last && s.startedAt.getTime() - Date.parse(last.to) <= GAP_MS)
+        last.to = s.endedAt.toISOString();
+      else noMotion.push({ from: s.startedAt.toISOString(), to: s.endedAt.toISOString() });
+    }
     return {
       from: from.toISOString(),
       to: to.toISOString(),
-      segments: segments.map((s) => ({
-        ...s,
-        holes: s.holes ?? [],
-        sizeBytes: Number(s.sizeBytes),
-      })),
+      segments: segments
+        .filter((s) => !s.pruned)
+        .map(({ pruned: _p, ...s }) => ({
+          ...s,
+          holes: s.holes ?? [],
+          sizeBytes: Number(s.sizeBytes),
+        })),
       gaps,
+      noMotion,
+      motion: motion.map((m) => ({
+        from: m.from.toISOString(),
+        to: m.to.toISOString(),
+        kind: m.kind,
+        source: m.source,
+      })),
     };
   });
 

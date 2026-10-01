@@ -145,6 +145,7 @@ export const AUDIT_LABELS: Record<string, string> = {
   "camera.enabled": "Câmera reativada",
   "camera.deleted": "Câmera excluída",
   "camera.stream_key_viewed": "Chave RTMP exibida",
+  "camera.motion_credential_rotated": "Credencial de eventos gerada",
   "camera.stream_key_rotated": "Chave RTMP trocada",
   "camera.playback_viewed": "Gravação assistida",
   "camera.export_requested": "Exportação de vídeo solicitada",
@@ -217,4 +218,8 @@ export const EVENT_LABELS: Record<string, string> = {
   tenant_quota: "Cota do cliente",
   system_disk: "Disco do sistema",
   alert_notified: "Aviso enviado por e-mail",
+  motion_mail_test: "E-mail de teste da câmera recebido",
+  motion_auth_blocked: "IP bloqueado (senha de eventos errada)",
+  motion_credential_rotated: "Credencial de eventos gerada",
+  motion_detector_error: "Falha no detector de movimento",
 };

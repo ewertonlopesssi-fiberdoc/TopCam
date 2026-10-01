@@ -1,3 +1,4 @@
+import { MOTION_HOLD_MIN } from "@topcam/shared";
 import type { PoolClient } from "./pool.js";
 import { insertCameraEvent, transitionCamera } from "./repo.js";
 
@@ -46,17 +47,23 @@ export async function upsertSegmentStart(
   s: { cameraId: string; relPath: string; startedAt: Date },
 ): Promise<{ segment: SegmentRow; inserted: boolean } | null> {
   const { rows } = await client.query<SegmentRow & { inserted: boolean }>(
-    `INSERT INTO recording_segments (tenant_id, camera_id, storage_node_id, path, started_at, expires_at)
+    // Gravação só com movimento: o segmento nasce em espera, com validade curta
+    // (keepMotionSegments estende os que encostam num movimento).
+    `INSERT INTO recording_segments (tenant_id, camera_id, storage_node_id, path, started_at, expires_at,
+                                     motion_hold)
      SELECT c.tenant_id, c.id,
             coalesce(c.storage_node_id, (SELECT id FROM storage_nodes ORDER BY created_at LIMIT 1)),
             $2, $3::timestamptz,
-            $3::timestamptz + make_interval(hours => coalesce(rp.retention_hours, 24))
+            CASE WHEN c.recording_mode = 'motion'
+                 THEN $3::timestamptz + make_interval(mins => $4)
+                 ELSE $3::timestamptz + make_interval(hours => coalesce(rp.retention_hours, 24)) END,
+            c.recording_mode = 'motion'
        FROM cameras c
        LEFT JOIN retention_policies rp ON rp.id = c.retention_policy_id
       WHERE c.id = $1
      ON CONFLICT (path) DO UPDATE SET path = EXCLUDED.path
      RETURNING ${SEGMENT_COLS}, (xmax = 0) AS inserted`,
-    [s.cameraId, s.relPath, s.startedAt],
+    [s.cameraId, s.relPath, s.startedAt, MOTION_HOLD_MIN],
   );
   const r = rows[0];
   if (!r) return null;
@@ -147,15 +154,20 @@ export async function markSegmentVerified(
   return { segment: seg, recordingStarted, gaps };
 }
 
-/** Lacunas entre este segmento e os vizinhos (evento único por par de segmentos). */
+/**
+ * Lacunas entre este segmento e os vizinhos (evento único por par de segmentos). Trechos
+ * apagados por falta de movimento contam como vizinhos: não são falha de sinal.
+ */
 async function recordGaps(client: PoolClient, seg: SegmentRow, code: string): Promise<number> {
   const neighbours = await client.query<SegmentRow & { side: string }>(
     `(SELECT ${SEGMENT_COLS}, 'prev' AS side FROM recording_segments
-       WHERE camera_id = $1 AND started_at < $2 AND id <> $3 AND state <> 'deleted'
+       WHERE camera_id = $1 AND started_at < $2 AND id <> $3
+         AND (state <> 'deleted' OR deleted_reason = 'no_motion')
        ORDER BY started_at DESC LIMIT 1)
      UNION ALL
      (SELECT ${SEGMENT_COLS}, 'next' AS side FROM recording_segments
-       WHERE camera_id = $1 AND started_at > $2 AND id <> $3 AND state <> 'deleted'
+       WHERE camera_id = $1 AND started_at > $2 AND id <> $3
+         AND (state <> 'deleted' OR deleted_reason = 'no_motion')
        ORDER BY started_at LIMIT 1)`,
     [seg.camera_id, seg.started_at, seg.id],
   );
@@ -197,7 +209,11 @@ export async function markSegmentState(
 ): Promise<void> {
   await client.query(
     `UPDATE recording_segments SET state = $2,
-            deleted_at = CASE WHEN $2 = 'deleted' THEN now() ELSE deleted_at END
+            deleted_at = CASE WHEN $2 = 'deleted' THEN now() ELSE deleted_at END,
+            -- Em espera (gravação só com movimento) e vencido: não teve movimento.
+            deleted_reason = CASE WHEN $2 = 'deleted'
+                                  THEN CASE WHEN motion_hold THEN 'no_motion' ELSE 'retention' END
+                                  ELSE deleted_reason END
       WHERE id = $1`,
     [id, state],
   );
@@ -220,13 +236,16 @@ export async function claimExpiredSegments(client: PoolClient, limit = 500): Pro
   return rows;
 }
 
-/** Recalcula a validade dos segmentos de uma câmera (retenção alterada). */
+/**
+ * Recalcula a validade dos segmentos de uma câmera (retenção alterada). Os em espera da
+ * gravação só com movimento mantêm a validade curta.
+ */
 export async function reapplyRetention(client: PoolClient, cameraId: string): Promise<number> {
   const res = await client.query(
     `UPDATE recording_segments s
         SET expires_at = s.started_at + make_interval(hours => coalesce(rp.retention_hours, 24))
        FROM cameras c LEFT JOIN retention_policies rp ON rp.id = c.retention_policy_id
-      WHERE c.id = s.camera_id AND s.camera_id = $1
+      WHERE c.id = s.camera_id AND s.camera_id = $1 AND NOT s.motion_hold
         AND s.state IN ('writing', 'verified', 'corrupt', 'missing')`,
     [cameraId],
   );

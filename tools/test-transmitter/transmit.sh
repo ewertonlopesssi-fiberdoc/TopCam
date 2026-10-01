@@ -6,7 +6,8 @@
 #
 # Variáveis: TX_URL (padrão rtmp://mediamtx:1935/live), TX_SIZE (640x360), TX_FPS (15),
 #            TX_BITRATE (800k), TX_AUDIO (1 = AAC 64k; 0 = sem áudio), TX_CODEC (libx264),
-#            TX_CLOCK (1 = relógio no vídeo para medir a latência de ponta a ponta)
+#            TX_CLOCK (1 = relógio no vídeo para medir a latência de ponta a ponta),
+#            TX_STILL (1 = imagem parada, sem movimento — teste da detecção de movimento)
 #
 # TX_CLOCK=1 desenha no topo da imagem uma faixa com 24 blocos pretos/brancos: os
 # milissegundos do relógio do servidor (módulo 2^24) no instante em que o quadro foi
@@ -25,6 +26,7 @@ TX_BITRATE="${TX_BITRATE:-800k}"
 TX_AUDIO="${TX_AUDIO:-1}"
 TX_CODEC="${TX_CODEC:-libx264}"
 TX_CLOCK="${TX_CLOCK:-0}"
+TX_STILL="${TX_STILL:-0}"
 
 # Faixa de 24 bits com o relógio (ms). O pts vira o relógio real (RTCTIME) só para
 # desenhar e volta a começar do zero antes de codificar.
@@ -47,7 +49,7 @@ fi
 run_ffmpeg() {
   duration="$1"
   set -- -hide_banner -loglevel warning -re \
-    -f lavfi -i "testsrc2=size=${TX_SIZE}:rate=${TX_FPS}"
+    -f lavfi -i "$( [ "$TX_STILL" = "1" ] && echo "color=c=gray:size=${TX_SIZE}:rate=${TX_FPS}" || echo "testsrc2=size=${TX_SIZE}:rate=${TX_FPS}")"
   if [ "$TX_AUDIO" = "1" ]; then
     set -- "$@" -f lavfi -i "sine=frequency=440:sample_rate=44100"
   fi

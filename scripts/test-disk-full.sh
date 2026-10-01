@@ -44,7 +44,7 @@ record() {
   [ "$2" = FAIL ] && FAILS=$((FAILS + 1))
   log "$1 $2 — $4"
 }
-SERVICES=(postgres redis api worker backup web gateway mediamtx prometheus node-exporter)
+SERVICES=(postgres redis api worker motion backup web gateway mediamtx prometheus node-exporter)
 healthy_all() {
   local s id st
   for s in "${SERVICES[@]}"; do

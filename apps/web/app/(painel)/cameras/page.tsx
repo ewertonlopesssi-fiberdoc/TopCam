@@ -37,6 +37,13 @@ import {
   useToast,
   type Column,
 } from "@/components/ui";
+import {
+  MOTION_DEFAULT,
+  MOTION_SOURCE_LABEL,
+  MotionCredentialBox,
+  MotionSettings,
+  type MotionValue,
+} from "@/components/motion-settings";
 import { api, qs, type Page } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { CAMERA_STATUS, TENANT_STATUS, fmtBytes, fmtDateTime, fmtRelative } from "@/lib/format";
@@ -64,8 +71,19 @@ interface Camera {
   fps: number | null;
   bitrateKbps: number | null;
   recordingEnabled: boolean;
+  recordingMode: "continuous" | "motion";
   retentionPolicyId: string | null;
   retentionPolicyName: string | null;
+  motionSource: MotionValue["motionSource"];
+  motionSensitivity: number;
+  alarmEnabled: boolean;
+  alarmSchedule: MotionValue["alarmSchedule"];
+  alarmCooldownS: number;
+  alarmEmail: boolean;
+  lastMotionAt: string | null;
+  motionCredential?: boolean;
+  motionSmtpUser?: string | null;
+  motionSmtpRotatedAt?: string | null;
   enabled: boolean;
   streamKeyPrefix?: string;
   streamKeyRotatedAt?: string;
@@ -175,8 +193,11 @@ function CameraForm({
   const [groupId, setGroupId] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [recording, setRecording] = useState(false);
+  /** off = só ao vivo; continuous = contínua; motion = só com movimento. */
+  const [recMode, setRecMode] = useState<"off" | "continuous" | "motion">("off");
   const [retentionId, setRetentionId] = useState("");
+  const [motion, setMotion] = useState<MotionValue>(MOTION_DEFAULT);
+  const recording = recMode !== "off";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -188,8 +209,26 @@ function CameraForm({
     setGroupId(camera?.groupId ?? "");
     setName(camera?.name ?? "");
     setDescription(camera?.description ?? "");
-    setRecording(camera?.recordingEnabled ?? false);
+    setRecMode(
+      camera?.recordingEnabled
+        ? camera.recordingMode === "motion"
+          ? "motion"
+          : "continuous"
+        : "off",
+    );
     setRetentionId(camera?.retentionPolicyId ?? retention[0]?.id ?? "");
+    setMotion(
+      camera
+        ? {
+            motionSource: camera.motionSource,
+            motionSensitivity: camera.motionSensitivity,
+            alarmEnabled: camera.alarmEnabled,
+            alarmSchedule: camera.alarmSchedule ?? { rules: [] },
+            alarmCooldownS: camera.alarmCooldownS,
+            alarmEmail: camera.alarmEmail,
+          }
+        : MOTION_DEFAULT,
+    );
   }, [open, camera, tenants, retention]);
 
   const tenantLocs = locations.filter((l) => l.tenantId === tenantId);
@@ -205,7 +244,9 @@ function CameraForm({
         locationId,
         groupId: groupId || null,
         recordingEnabled: recording,
+        recordingMode: recMode === "motion" ? "motion" : "continuous",
         retentionPolicyId: recording ? retentionId || null : null,
+        ...motion,
       };
       if (camera) {
         await api.patch(`/cameras/${camera.id}`, body);
@@ -318,18 +359,24 @@ function CameraForm({
             onChange={(e) => setDescription(e.target.value)}
           />
         </Field>
-        <div className="rounded-xl border border-line p-3 sm:col-span-2">
-          <label className="flex items-center gap-2 text-sm font-medium">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-brand-600"
-              checked={recording}
-              onChange={(e) => setRecording(e.target.checked)}
-            />
-            Gravação contínua
-          </label>
-          {recording && (
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div
+          className="rounded-xl border border-line p-3 sm:col-span-2"
+          data-testid="recording-settings"
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Gravação">
+              <select
+                className="input"
+                value={recMode}
+                onChange={(e) => setRecMode(e.target.value as typeof recMode)}
+                data-testid="recording-mode"
+              >
+                <option value="off">Somente ao vivo (não grava)</option>
+                <option value="continuous">Contínua</option>
+                <option value="motion">Só com movimento</option>
+              </select>
+            </Field>
+            {recording && (
               <Field label="Retenção">
                 <select
                   className="input"
@@ -343,11 +390,20 @@ function CameraForm({
                   ))}
                 </select>
               </Field>
-              <p className="self-end text-xs text-muted">
-                A gravação começa a funcionar na Fase 4. A configuração já fica salva.
-              </p>
-            </div>
+            )}
+          </div>
+          {recMode === "motion" && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Guarda cada movimento com 10 s antes e 30 s depois, pela retenção escolhida. O que não
+              teve movimento é apagado depois de 1 hora.
+              {motion.motionSource === "off" &&
+                " Escolha abaixo de onde vem a detecção de movimento."}
+            </p>
           )}
+        </div>
+        <div className="rounded-xl border border-line p-3 sm:col-span-2">
+          <div className="mb-2 text-sm font-medium">Movimento e alarme</div>
+          <MotionSettings value={motion} onChange={setMotion} />
         </div>
         {!camera && (
           <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:col-span-2">
@@ -487,8 +543,17 @@ function CameraDrawer({
     [
       "Gravação",
       camera.recordingEnabled
-        ? `Contínua · ${camera.retentionPolicyName ?? ""}`
+        ? `${camera.recordingMode === "motion" ? "Só com movimento" : "Contínua"} · ${camera.retentionPolicyName ?? ""}`
         : "Somente ao vivo",
+    ],
+    ["Movimento", MOTION_SOURCE_LABEL[camera.motionSource] ?? camera.motionSource],
+    [
+      "Alarme",
+      camera.alarmEnabled
+        ? camera.alarmSchedule?.rules?.length
+          ? `Ligado · ${camera.alarmSchedule.rules.length} faixa(s) de horário`
+          : "Ligado · sempre"
+        : "Desligado",
     ],
     ["Cadastrada em", fmtDateTime(camera.createdAt)],
   ];
@@ -503,6 +568,15 @@ function CameraDrawer({
         ))}
       </dl>
       <RecordingPanel cameraId={camera.id} />
+      {canKeys && camera.motionSource === "camera" && (
+        <MotionCredentialBox
+          cameraId={camera.id}
+          user={camera.motionSmtpUser}
+          rotatedAt={camera.motionSmtpRotatedAt}
+          lastMotionAt={camera.lastMotionAt}
+          onChanged={onChanged}
+        />
+      )}
       {canKeys && (
         <section className="mt-6 rounded-xl border border-line p-4">
           <h3 className="mb-1 flex items-center gap-2 font-semibold">

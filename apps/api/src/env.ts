@@ -22,6 +22,8 @@ const schema = z.object({
   /** Raiz das gravações como o MediaMTX a vê (os hooks informam caminhos absolutos). */
   RECORDINGS_PATH: z.string().default("/recordings"),
   RTMP_PUBLIC_PORT: z.coerce.number().int().positive().default(1935),
+  /** Porta pública do receptor de eventos (e-mail das câmeras com detecção própria). */
+  EVENTS_SMTP_PUBLIC_PORT: z.coerce.number().int().positive().default(2525),
   /** Janela em que uma câmera com vídeo recente é considerada publicando (recusa duplicadas). */
   PUBLISH_ACTIVE_WINDOW_S: z.coerce.number().positive().default(12),
   /** Janela de supressão de eventos repetidos de chave inválida (segundos). */

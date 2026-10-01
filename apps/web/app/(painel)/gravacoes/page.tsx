@@ -40,6 +40,10 @@ interface Timeline {
     holes?: Array<{ from: number; to: number }>;
   }>;
   gaps: Gap[];
+  /** Movimentos detectados no dia (marcados em outra cor na linha do tempo). */
+  motion?: Array<{ from: string; to: string; kind: string }>;
+  /** Trechos apagados por não terem movimento (gravação só com movimento). */
+  noMotion?: Array<{ from: string; to: string }>;
 }
 interface ExportGrant {
   downloadUrl: string;
@@ -90,6 +94,8 @@ function Gravacoes() {
   const toast = useToast();
   const params = useSearchParams();
   const cameraParam = params.get("camera");
+  /** Link do alarme: abre a gravação no horário do movimento (ms). */
+  const tParam = Number(params.get("t")) || null;
 
   // ---- clientes, locais e câmeras com gravação
   const [tenants, setTenants] = useState<TreeTenant[]>([]);
@@ -158,7 +164,9 @@ function Gravacoes() {
       .get<Summary>(`/cameras/${cameraId}/recordings/summary`)
       .then((s) => {
         setSummary(s);
-        const d = s.newest ? dayOf(Date.parse(s.newest)) : today;
+        const atLink = tParam && cameraId === cameraParam ? tParam : null;
+        if (atLink) pendingSeek.current = atLink;
+        const d = atLink ? dayOf(atLink) : s.newest ? dayOf(Date.parse(s.newest)) : today;
         setDay(d);
         setMonth(d.slice(0, 7));
       })
@@ -435,6 +443,8 @@ function Gravacoes() {
                     day={day}
                     spans={spans}
                     gaps={timeline.gaps}
+                    motion={timeline.motion ?? []}
+                    noMotion={timeline.noMotion ?? []}
                     cursor={cursor}
                     onSeek={seek}
                   />

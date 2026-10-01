@@ -2,18 +2,25 @@ import {
   insertCameraEvent,
   nextCameraCode,
   reapplyRetention,
+  releaseMotionHolds,
   rotateStreamKey,
   transitionCamera,
   type PoolClient,
 } from "@topcam/db";
 import {
   CAMERA_STATUSES,
+  HHMM_RE,
+  MOTION_SOURCES,
+  RECORDING_MODES,
   can,
   cameraVisibility,
   decryptStreamKey,
   encryptStreamKey,
+  generateSmtpCredential,
   generateStreamKey,
+  hashSmtpPassword,
   hashStreamKey,
+  normalizeSchedule,
   mediaPathForKey,
   parseEncryptionKey,
   streamKeyPrefix,
@@ -32,6 +39,30 @@ const listQuery = pagination.extend({
   search: z.string().trim().max(100).optional(),
 });
 
+const alarmSchedule = z.object({
+  rules: z
+    .array(
+      z.object({
+        days: z.array(z.number().int().min(0).max(6)).min(1, "Escolha ao menos um dia").max(7),
+        from: z.string().regex(HHMM_RE, "Horário inválido (HH:MM)"),
+        to: z.string().regex(HHMM_RE, "Horário inválido (HH:MM)"),
+      }),
+    )
+    .max(14),
+});
+
+/** Movimento e alarme (todos opcionais; o que não vier fica como está). */
+const motionFields = {
+  /** continuous = grava tudo; motion = só guarda o que teve movimento. */
+  recordingMode: z.enum(RECORDING_MODES).optional(),
+  motionSource: z.enum(MOTION_SOURCES).optional(),
+  motionSensitivity: z.number().int().min(1).max(10).optional(),
+  alarmEnabled: z.boolean().optional(),
+  alarmSchedule: alarmSchedule.optional(),
+  alarmCooldownS: z.number().int().min(0).max(86400).optional(),
+  alarmEmail: z.boolean().optional(),
+};
+
 const baseBody = z.object({
   name: z.string().trim().min(2).max(120),
   description: z.string().trim().max(500).nullable().optional(),
@@ -39,6 +70,7 @@ const baseBody = z.object({
   groupId: z.string().uuid().nullable().optional(),
   recordingEnabled: z.boolean().default(false),
   retentionPolicyId: z.string().uuid().nullable().optional(),
+  ...motionFields,
 });
 
 const createBody = baseBody.extend({ tenantId: z.string().uuid() });
@@ -63,6 +95,11 @@ const CAMERA_SELECT = `
          c.video_codec AS "videoCodec", c.audio_codec AS "audioCodec", c.width, c.height,
          c.fps::float8 AS fps, c.bitrate_kbps AS "bitrateKbps",
          c.recording_enabled AS "recordingEnabled", c.recording_mode AS "recordingMode",
+         c.motion_source AS "motionSource", c.motion_sensitivity AS "motionSensitivity",
+         c.alarm_enabled AS "alarmEnabled", c.alarm_schedule AS "alarmSchedule",
+         c.alarm_cooldown_s AS "alarmCooldownS", c.alarm_email AS "alarmEmail",
+         c.last_motion_at AS "lastMotionAt",
+         c.motion_smtp_user AS "motionSmtpUser", c.motion_smtp_rotated_at AS "motionSmtpRotatedAt",
          c.retention_policy_id AS "retentionPolicyId", rp.name AS "retentionPolicyName",
          rp.retention_hours AS "retentionHours",
          c.enabled, c.stream_key_prefix AS "streamKeyPrefix", c.stream_key_rotated_at AS "streamKeyRotatedAt",
@@ -95,10 +132,32 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
   /** Remove a chave de quem não pode vê-la. */
   function present(req: FastifyRequest, row: Record<string, unknown>) {
     if (!can(req.user!.role, "cameras.keys")) {
-      const { streamKeyPrefix: _p, streamKeyRotatedAt: _r, ...rest } = row;
-      return rest;
+      const {
+        streamKeyPrefix: _p,
+        streamKeyRotatedAt: _r,
+        motionSmtpUser: _u,
+        motionSmtpRotatedAt: _m,
+        ...rest
+      } = row;
+      return { ...rest, motionCredential: Boolean(_u) };
     }
-    return row;
+    return { ...row, motionCredential: Boolean(row.motionSmtpUser) };
+  }
+
+  /**
+   * Regras de movimento e alarme sobre o estado final da câmera (atual + alterações).
+   * Gravação só com movimento e alarme exigem uma origem de movimento.
+   */
+  function checkMotion(m: {
+    recording: boolean;
+    recordingMode: string;
+    motionSource: string;
+    alarmEnabled: boolean;
+  }) {
+    if (m.recording && m.recordingMode === "motion" && m.motionSource === "off")
+      throw badRequest("Para gravar só com movimento, escolha de onde vem a detecção de movimento");
+    if (m.alarmEnabled && m.motionSource === "off")
+      throw badRequest("Para ligar o alarme, escolha de onde vem a detecção de movimento");
   }
 
   async function loadCamera(c: PoolClient, req: FastifyRequest, id: string, lock = false) {
@@ -267,6 +326,12 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
       await validatePlacement(c, b.tenantId, b.locationId, b.groupId);
       const retention = await resolveRetention(c, b.recordingEnabled, b.retentionPolicyId);
       if (b.recordingEnabled && !retention) throw badRequest("Defina uma política de retenção");
+      checkMotion({
+        recording: b.recordingEnabled,
+        recordingMode: b.recordingMode ?? "continuous",
+        motionSource: b.motionSource ?? "off",
+        alarmEnabled: b.alarmEnabled ?? false,
+      });
       const code = await nextCameraCode(c, b.tenantId);
       const ingest = await c.query<{ id: string }>(
         "SELECT id FROM ingest_nodes ORDER BY created_at LIMIT 1",
@@ -296,6 +361,21 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
         ],
       );
       const id = rows[0]!.id;
+      await c.query(
+        `UPDATE cameras SET recording_mode = $2, motion_source = $3, motion_sensitivity = $4,
+                alarm_enabled = $5, alarm_schedule = $6, alarm_cooldown_s = $7, alarm_email = $8
+          WHERE id = $1`,
+        [
+          id,
+          b.recordingMode ?? "continuous",
+          b.motionSource ?? "off",
+          b.motionSensitivity ?? 5,
+          b.alarmEnabled ?? false,
+          JSON.stringify(normalizeSchedule(b.alarmSchedule ?? { rules: [] })),
+          b.alarmCooldownS ?? 300,
+          b.alarmEmail ?? true,
+        ],
+      );
       await audit(c, req, "camera.created", {
         tenantId: b.tenantId,
         entityType: "camera",
@@ -332,11 +412,25 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
           ? b.retentionPolicyId
           : (cur.retentionPolicyId as string | null),
       );
+      const recordingMode = b.recordingMode ?? (cur.recordingMode as string);
+      const motionSource = b.motionSource ?? (cur.motionSource as string);
+      checkMotion({
+        recording,
+        recordingMode,
+        motionSource,
+        alarmEnabled: b.alarmEnabled ?? (cur.alarmEnabled as boolean),
+      });
       await c.query(
         `UPDATE cameras SET name = COALESCE($2, name),
                 description = CASE WHEN $3::boolean THEN $4 ELSE description END,
                 location_id = $5, group_id = $6, recording_enabled = $7, retention_policy_id = $8,
-                enabled = COALESCE($9, enabled)
+                enabled = COALESCE($9, enabled),
+                recording_mode = $10, motion_source = $11,
+                motion_sensitivity = COALESCE($12, motion_sensitivity),
+                alarm_enabled = COALESCE($13, alarm_enabled),
+                alarm_schedule = COALESCE($14::jsonb, alarm_schedule),
+                alarm_cooldown_s = COALESCE($15, alarm_cooldown_s),
+                alarm_email = COALESCE($16, alarm_email)
           WHERE id = $1`,
         [
           id,
@@ -348,10 +442,20 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
           recording,
           retention,
           b.enabled ?? null,
+          recordingMode,
+          motionSource,
+          b.motionSensitivity ?? null,
+          b.alarmEnabled ?? null,
+          b.alarmSchedule ? JSON.stringify(normalizeSchedule(b.alarmSchedule)) : null,
+          b.alarmCooldownS ?? null,
+          b.alarmEmail ?? null,
         ],
       );
       // Retenção alterada: a validade das gravações já feitas acompanha a nova regra.
       if (retention && retention !== cur.retentionPolicyId) await reapplyRetention(c, id);
+      // Saiu da gravação só com movimento (ou desligou a gravação): o que estava em espera
+      // passa a valer a retenção normal — nada é apagado de surpresa.
+      if (!(recording && recordingMode === "motion")) await releaseMotionHolds(c, id);
       if (b.enabled === false && cur.enabled)
         await transitionCamera(c, id, "disabled", "disabled_by_user");
       if (b.enabled === true && !cur.enabled)
@@ -397,6 +501,53 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
     await wakeWorker(app);
     return { ok: true };
   });
+
+  // ------------------------------------------------------------------ credencial de eventos
+  /**
+   * Gera (ou troca) o usuário e a senha com que a câmera envia os avisos de movimento por
+   * e-mail ao receptor de eventos. A senha só aparece aqui; o banco guarda o hash.
+   */
+  app.post<{ Params: { id: string } }>(
+    "/api/v1/cameras/:id/motion-credential",
+    rotateKey,
+    async (req) => {
+      const id = parseBody(uuid, req.params.id);
+      const cred = generateSmtpCredential();
+      const cam = await db(app, req, async (c) => {
+        const cur = await loadCamera(c, req, id, true);
+        await c.query(
+          `UPDATE cameras SET motion_smtp_user = $2, motion_smtp_hash = $3, motion_smtp_rotated_at = now()
+            WHERE id = $1`,
+          [id, cred.user, hashSmtpPassword(cred.user, cred.password)],
+        );
+        await insertCameraEvent(c, {
+          tenantId: cur.tenantId,
+          cameraId: id,
+          type: "motion_credential_rotated",
+          message: `Credencial de eventos (e-mail) gerada para ${cur.code}`,
+        });
+        await audit(c, req, "camera.motion_credential_rotated", {
+          tenantId: cur.tenantId,
+          entityType: "camera",
+          entityId: id,
+          data: { code: cur.code, user: cred.user },
+        });
+        return cur;
+      });
+      return {
+        cameraId: cam.id,
+        smtp: {
+          server: env.PUBLIC_HOST,
+          port: env.EVENTS_SMTP_PUBLIC_PORT,
+          user: cred.user,
+          password: cred.password,
+          /** Remetente/destinatário: qualquer endereço serve; a câmera é reconhecida pelo usuário. */
+          to: `eventos@${env.PUBLIC_HOST}`,
+          tls: "STARTTLS se a câmera oferecer; sem criptografia também é aceito",
+        },
+      };
+    },
+  );
 
   // ------------------------------------------------------------------ chave RTMP
   app.get<{ Params: { id: string } }>("/api/v1/cameras/:id/stream-key", revealKey, async (req) => {
@@ -547,6 +698,39 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
         ],
       );
       const newId = rows[0]!.id;
+      // Movimento e alarme seguem a câmera. Com a mesma chave (mesmo equipamento, sem
+      // reconfigurar), a credencial de eventos também passa para a câmera nova.
+      await c.query(
+        `UPDATE cameras n
+            SET recording_mode = o.recording_mode, motion_source = o.motion_source,
+                motion_sensitivity = o.motion_sensitivity, alarm_enabled = o.alarm_enabled,
+                alarm_schedule = o.alarm_schedule, alarm_cooldown_s = o.alarm_cooldown_s,
+                alarm_email = o.alarm_email
+           FROM cameras o WHERE n.id = $1 AND o.id = $2`,
+        [newId, id],
+      );
+      if (b.keepKey) {
+        const cred = (
+          await c.query<{ u: string | null; h: string | null; r: Date | null }>(
+            `UPDATE cameras SET motion_smtp_user = NULL, motion_smtp_hash = NULL
+               FROM (SELECT motion_smtp_user AS u, motion_smtp_hash AS h, motion_smtp_rotated_at AS r
+                       FROM cameras WHERE id = $1) old
+              WHERE id = $1 RETURNING old.u, old.h, old.r`,
+            [id],
+          )
+        ).rows[0];
+        if (cred?.u)
+          await c.query(
+            `UPDATE cameras SET motion_smtp_user = $2, motion_smtp_hash = $3, motion_smtp_rotated_at = $4
+              WHERE id = $1`,
+            [newId, cred.u, cred.h, cred.r],
+          );
+      } else {
+        await c.query(
+          "UPDATE cameras SET motion_smtp_user = NULL, motion_smtp_hash = NULL WHERE id = $1",
+          [id],
+        );
+      }
       const data = {
         from: { tenant: old.tenant_name, code: cur.code, cameraId: id },
         to: { tenant: t.name, code, cameraId: newId },

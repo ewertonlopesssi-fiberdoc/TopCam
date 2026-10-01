@@ -25,11 +25,11 @@
 
 set -uo pipefail
 
-VERSION=1
+VERSION=2
 CONF=/etc/topcam/host.conf
 STATE=/var/lib/topcam
 TABLE="inet topcam_fw"
-PUBLIC_TCP="80, 443, 1935, 1936, 8189"
+PUBLIC_TCP="80, 443, 1935, 1936, 2525, 8189"
 
 log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 die() { echo "erro: $*" >&2; exit 1; }
@@ -97,7 +97,8 @@ $( [ ${#v6[@]} -gt 0 ] && printf '\t\telements = { %s }\n' "$j6" )
 		# SSH só das redes liberadas no painel
 		tcp dport 22 ip saddr @ssh_v4 accept
 		tcp dport 22 ip6 saddr @ssh_v6 accept
-		# Serviços públicos do TopCam: painel (80/443), câmeras (1935/1936), WebRTC (8189)
+		# Serviços públicos do TopCam: painel (80/443), câmeras (1935/1936), eventos das câmeras
+		# por e-mail (2525), WebRTC (8189)
 		tcp dport { $PUBLIC_TCP } accept
 		udp dport 8189 accept
 		# DHCP (se a VM usar)
@@ -168,7 +169,8 @@ firewall_sync() {
     log "lista vazia/inválida: regras atuais mantidas"
     return 1
   fi
-  hash=$(printf '%s\n' "${good[@]}" | sha256sum | cut -c1-16)
+  # As portas públicas entram no hash: uma versão nova do script com porta nova reaplica sozinha.
+  hash=$(printf '%s\n' "${good[@]}" "$PUBLIC_TCP" | sha256sum | cut -c1-16)
   if [ "$force" != 1 ] && [ "$(cat "$STATE/firewall.hash" 2>/dev/null)" = "$hash" ] && nft list table $TABLE >/dev/null 2>&1; then
     # Nada mudou: só registra que o serviço está vivo.
     psqlq "UPDATE system_settings SET value = jsonb_set(value, '{checked_at}', to_jsonb('$now'::text)) WHERE key = 'firewall.status'" >/dev/null

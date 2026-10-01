@@ -155,7 +155,7 @@ As versões serão fixadas no lockfile e nas tags de imagem ao implementar a Fas
 | D5 | **App mobile** | A especificação deixa a escolha em aberto | Painel web responsivo primeiro. App em **Expo/React Native** (iOS e Android), usando a mesma API | Fase 9 |
 | D6 | **Backup externo** | O destino não está definido | Proxmox Backup Server para a VM + pg_dump diário para NFS/SMB ou S3 externo. Informe qual existe | Fase 8 |
 | D7 | **Canais de alerta** | Não especificados | Alertas no painel + e-mail. Telegram/WhatsApp opcionais | Fase 7 |
-| D8 | **Imagem × especificação** | As imagens mostram câmeras **RTSP** e "tipo de gravação: Movimento/Evento". A especificação prevê só RTMP push e gravação contínua | Modelo já preparado (`rtsp_pull`, `motion`, `event`), mas só RTMP + contínua implementados. Detecção de movimento exige decodificação (CPU), o que contraria "sem transcodificação". Só incluo se você aprovar como escopo novo. O botão **"Importar"** da tela Câmeras também contraria a especificação ("não incluir cadastro em massa na primeira versão"): na primeira versão ele fica fora, só com a opção "Exportar" | — |
+| D8 | **Imagem × especificação** | As imagens mostram câmeras **RTSP** e "tipo de gravação: Movimento/Evento". A especificação prevê só RTMP push e gravação contínua | Modelo já preparado (`rtsp_pull`, `motion`, `event`), mas só RTMP + contínua implementados. Detecção de movimento exige decodificação (CPU), o que contraria "sem transcodificação". Só incluo se você aprovar como escopo novo. ✅ **Aprovado em 01/10/2026:** gravação só com movimento (detecção pela câmera ou pelo servidor, só quadros-chave, sem transcodificar o vídeo gravado). O botão **"Importar"** da tela Câmeras também contraria a especificação ("não incluir cadastro em massa na primeira versão"): na primeira versão ele fica fora, só com a opção "Exportar" | — |
 | D9 | **Limites dos planos** | Nomes aparecem nas imagens, valores não | Valores padrão editáveis no painel | Fase 2 |
 | D10 | **Repositório** | ✅ **Decidido:** repositório privado **TopCam** na conta `ewertonlopesssi-fiberdoc` | O push é feito pelo Ewe (sem acesso à conta a partir daqui) | — |
 | D11 | **Meu ambiente de teste** | Aqui na nuvem tenho Docker, Node 22, ffmpeg e psql, mas o Docker Hub está limitando downloads (erro 429) e o GitHub Releases está bloqueado | Rodo aqui tudo o que for possível. O teste completo com `docker compose` na sua VM terá um script de aceite que gera o relatório. Se a imagem não puder ser baixada aqui, digo exatamente o que não foi testado | — |
@@ -190,6 +190,12 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
    - transferência de câmera;
    - câmeras agrupadas por cliente.
 2. **Fase 8 — Segurança, backup e resiliência** (HTTPS). Pré-requisito do SGP e do app.
+   - Teste contínuo de 7 dias iniciado em **01/10/2026 às 13:22** (relatório a partir de 08/10, 13:22).
+   - **Movimento e alarme** (pedido em 01/10/2026, escopo novo aprovado; muda a decisão D8): detecção de
+     movimento pela câmera (aviso por e-mail, ex.: Intelbras VIP) ou pelo servidor (quadros-chave),
+     gravação só com movimento, alarme com horários e intervalo mínimo, marcação na linha do tempo.
+     Pronto no laboratório; vai para a produção **depois** do teste de 7 dias. Ver `movimento-alarme-relatorio.md`.
+     Notificação no app entra com o app (Fase 9); reconhecimento facial fica para o fim (hardware + LGPD).
 3. **Integração SGP** (Gateway Genérico). Decisões e pendências em `analise-integracao-sgp.md`; antes, capturar avisos reais de um cliente de teste.
 4. **Localização + mapa** (decidido fazer junto com o mapa, depois do SGP):
    - latitude/longitude no **cliente** e na **câmera**;

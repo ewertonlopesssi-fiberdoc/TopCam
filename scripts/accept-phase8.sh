@@ -88,7 +88,7 @@ stop_tx() { docker rm -f topcam-tx8-CAM-001 >/dev/null 2>&1; }
 reconcile() { sql "INSERT INTO durable_jobs (type, payload) VALUES ('mediamtx.reconcile', '{\"reason\":\"aceite8\"}')" >/dev/null; dc exec -T redis redis-cli publish topcam:jobs:wake 1 >/dev/null 2>&1; }
 
 # Serviços que devem estar sempre no ar (sem os de uma execução só e os de teste).
-SERVICES=(postgres redis api worker backup web gateway mediamtx prometheus node-exporter)
+SERVICES=(postgres redis api worker motion backup web gateway mediamtx prometheus node-exporter)
 healthy_all() {
   local s id st
   for s in "${SERVICES[@]}"; do
@@ -351,7 +351,7 @@ else
   SNAP=$(index_snapshot "$T_SNAP")
   EPOCH0=$(now_s)
   TIMES=""
-  for s in redis postgres api worker backup web gateway mediamtx; do
+  for s in redis postgres api worker motion backup web gateway mediamtx; do
     log "R1: reiniciando $s"
     t=$(now_s)
     dc restart "$s" >/dev/null 2>&1

@@ -7,7 +7,7 @@ Entregue em partes. Este documento é atualizado a cada parte.
 | 1 | HTTPS (Let's Encrypt), RTMPS, firewall editável no painel | **aprovada na VM em 30/09/2026** (RTMPS pronto, ainda desligado) |
 | 2 | Limite de requisições (rate limit) e rotação de segredos com recriptografia | **implementada e testada no laboratório; aguardando aplicação na VM** |
 | 3 | Backup remoto configurável no painel (SFTP/FTPS/FTP, cifrado) e restauração | **implementada e testada no laboratório; aguardando aplicação na VM e o destino real** |
-| 4 | Restauração em VM limpa, testes de reinício, disco cheio, relatório de 7 dias, aceite | **aprovada em 01/10/2026** (VM de teste e produção); falta o teste contínuo de 7 dias |
+| 4 | Restauração em VM limpa, testes de reinício, disco cheio, relatório de 7 dias, aceite | **aprovada em 01/10/2026** (VM de teste e produção); teste contínuo de 7 dias **iniciado em 01/10/2026 às 13:22** (retenção da TWG em 7 dias; relatório a partir de 08/10, 13:22) |
 
 ---
 
@@ -523,3 +523,4 @@ Pedido em 01/10/2026, aproveitando o espaço do HD18-TB.
 - **Disco de vídeo:** de 35 GB para **1 TB**, decisão do Ewe. Cabem cerca de 7 câmeras como a TWG com 7 dias, abaixo de 85%. O aumento é feito com a VM ligada (`qm disk resize` + `resize2fs`). A proteção de disco passa a usar o novo tamanho sozinha.
 - **Observação:** o limite de retenção do plano ainda não é conferido no cadastro da câmera; ele só aparece na tela de Planos. Hoje não há conflito, porque todos os planos aceitam pelo menos 7 dias. Fica registrado para uma fase futura.
 - **Testes:** 214/214.
+- **Pacote aplicado e teste iniciado:** retenção 3/7 dias aplicada na VM 107; a TWG passou para 7 dias em 01/10/2026 às 13:22, que é o início do teste contínuo. Relatório: `scripts/report-7days.sh --since "2026-10-01 13:22"`.

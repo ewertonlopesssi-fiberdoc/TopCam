@@ -33,6 +33,7 @@ x-app: &app
     STREAM_KEY_ENC_KEY: ${STREAM_KEY_ENC_KEY:?defina STREAM_KEY_ENC_KEY}
     PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
     RTMP_PUBLIC_PORT: ${RTMP_PUBLIC_PORT:-1935}
+    EVENTS_SMTP_PUBLIC_PORT: ${EVENTS_SMTP_PUBLIC_PORT:-2525}
     RECORDINGS_PATH: /recordings
     JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET (scripts/generate-env.sh --add-missing)}
     COOKIE_SECURE: ${COOKIE_SECURE:-false}
@@ -141,6 +142,40 @@ services:
       interval: 10s
       timeout: 3s
       retries: 6
+      start_period: 20s
+
+  # Movimento: receptor de eventos por e-mail (SMTP) das câmeras com detecção própria
+  # (ex.: Intelbras VIP; usuário e senha por câmera) e detector do servidor (ffmpeg, só
+  # quadros-chave) para as demais. Separado do worker para não disputar CPU.
+  motion:
+    <<: *app
+    command: ["node", "apps/worker/dist/motion-main.js"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://topcam_app:${APP_DB_PASSWORD:?defina APP_DB_PASSWORD}@postgres:5432/topcam
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      EVENTS_SMTP_PORT: 2525
+      MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
+      MEDIA_READ_USER: topcam-internal
+      MEDIA_READ_PASSWORD: ${MEDIA_READ_PASSWORD:?defina MEDIA_READ_PASSWORD}
+    ports:
+      - "${EVENTS_BIND:-0.0.0.0}:${EVENTS_SMTP_PUBLIC_PORT:-2525}:2525"
+    volumes:
+      # Certificado do painel (copiado pelo serviço do host) para o STARTTLS.
+      - ./.data/tls:/tls:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # Receptor aceitando conexões e detector sincronizando (heartbeat recente).
+      test:
+        [
+          "CMD-SHELL",
+          'test $$(( $$(date +%s) - $$(stat -c %Y /tmp/motion-heartbeat) )) -lt 90 && node -e "require(''net'').connect(2525,''127.0.0.1'').on(''connect'',()=>process.exit(0)).on(''error'',()=>process.exit(1))"',
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 4
       start_period: 20s
 
   # Prepara a pasta de gravações: dono = usuário 1000, o mesmo do MediaMTX (que
@@ -339,6 +374,7 @@ services:
       TX_FPS: ${TX_FPS:-15}
       TX_BITRATE: ${TX_BITRATE:-800k}
       TX_CLOCK: ${TX_CLOCK:-0}
+      TX_STILL: ${TX_STILL:-0}
     volumes:
       - ./tools/test-transmitter:/tools:ro
     logging: *logging

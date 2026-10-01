@@ -21,16 +21,34 @@ const ZOOMS = [
   { h: 1, label: "1 h", step: 1 / 6 },
 ] as const;
 
+export interface MotionMark {
+  from: string;
+  to: string;
+  kind: string;
+}
+
+const KIND_PT: Record<string, string> = {
+  human: "Pessoa",
+  audio: "Som",
+  motion: "Movimento",
+};
+
 export function RecordingTimeline({
   day,
   spans,
   gaps,
+  motion = [],
+  noMotion = [],
   cursor,
   onSeek,
 }: {
   day: string; // AAAA-MM-DD no fuso do painel
   spans: Span[];
   gaps: Gap[];
+  /** Movimentos detectados: marcados em âmbar por cima da gravação. */
+  motion?: MotionMark[];
+  /** Trechos apagados por falta de movimento (não são lacuna de sinal). */
+  noMotion?: Array<{ from: string; to: string }>;
   cursor: number | null;
   onSeek: (ms: number) => void;
 }) {
@@ -78,8 +96,14 @@ export function RecordingTimeline({
           <span className="h-2.5 w-4 rounded-sm bg-red-400" /> Lacuna de sinal ({gaps.length}
           {gaps.length ? `, ${fmtDuration(gapTotal)}` : ""})
         </span>
+        {(motion.length > 0 || noMotion.length > 0) && (
+          <span className="flex items-center gap-1.5" data-testid="timeline-motion-legend">
+            <span className="h-2.5 w-4 rounded-sm bg-amber-400" /> Movimento ({motion.length})
+          </span>
+        )}
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-sm bg-slate-200" /> Sem gravação
+          <span className="h-2.5 w-4 rounded-sm bg-slate-200" />{" "}
+          {noMotion.length ? "Sem gravação / sem movimento" : "Sem gravação"}
         </span>
         <div className="ml-auto flex items-center gap-1">
           {zoom > 0 && (
@@ -163,6 +187,35 @@ export function RecordingTimeline({
               }}
               title={`${g.internal ? "Quadros perdidos" : "Lacuna"} de ${fmtDuration(g.s)}: ${fmtClock(g.from)} – ${fmtClock(g.to)}`}
               data-testid="timeline-gap"
+            />
+          ))}
+        {motion
+          .map((m) => ({ from: Date.parse(m.from), to: Date.parse(m.to), kind: m.kind }))
+          .filter((m) => m.to > winStart && m.from < winEnd)
+          .map((m) => (
+            <div
+              key={`m${m.from}`}
+              className="absolute inset-y-0 bg-amber-400"
+              style={{
+                left: `${pct(m.from)}%`,
+                width: `${Math.max(pct(m.to) - pct(m.from), 0.3)}%`,
+              }}
+              title={`${KIND_PT[m.kind] ?? "Movimento"}: ${fmtClock(m.from)} – ${fmtClock(m.to)}`}
+              data-testid="timeline-motion"
+            />
+          ))}
+        {noMotion
+          .map((g) => ({ from: Date.parse(g.from), to: Date.parse(g.to) }))
+          .filter((g) => g.to > winStart && g.from < winEnd)
+          .map((g) => (
+            <div
+              key={`n${g.from}`}
+              className="absolute inset-y-0"
+              style={{
+                left: `${pct(g.from)}%`,
+                width: `${Math.max(pct(g.to) - pct(g.from), 0.15)}%`,
+              }}
+              title={`Sem movimento (não guardado): ${fmtClock(g.from)} – ${fmtClock(g.to)}`}
             />
           ))}
         {cursor !== null && cursor >= winStart && cursor <= winEnd && (

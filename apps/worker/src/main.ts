@@ -31,6 +31,7 @@ import {
   notifyAlerts,
   sampleStatus,
 } from "./jobs/monitor.js";
+import { keepMotion, processAlarms } from "./jobs/motion.js";
 import { reconcileMediaServer } from "./jobs/reconcile.js";
 import { checkStorage, newStorageState } from "./jobs/storage.js";
 import { runFfprobe } from "./lib/ffprobe.js";
@@ -193,6 +194,16 @@ every(env.NOTIFY_INTERVAL_S, "notify", async () => {
   if (r.sent || r.failed) log.info(r, "e-mails de alerta");
 });
 
+// Movimento: gravação só com movimento (mantém o que teve movimento) e alarme.
+every(20, "motion-keep", async () => {
+  const n = await keepMotion(ctx);
+  if (n) log.debug({ n }, "segmentos mantidos por movimento");
+});
+every(5, "alarms", async () => {
+  const r = await processAlarms(ctx);
+  if (r.notified || r.failed) log.info(r, "alarme");
+});
+
 every(60, "housekeeping", async () => {
   const n = await withScope(pool, PLATFORM, (c) => recoverStaleJobs(c));
   if (n) log.warn({ n }, "tarefas presas devolvidas à fila");
@@ -201,6 +212,8 @@ every(3600, "prune", () =>
   withScope(pool, PLATFORM, async (c) => {
     await pruneJobs(c);
     await pruneDeletedSegments(c);
+    await c.query("DELETE FROM motion_events WHERE ended_at < now() - interval '40 days'");
+    await c.query("DELETE FROM alarm_notifications WHERE created_at < now() - interval '90 days'");
   }),
 );
 

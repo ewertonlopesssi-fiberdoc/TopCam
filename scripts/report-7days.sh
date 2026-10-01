@@ -66,7 +66,9 @@ RESTARTED=""
 FROM_EPOCH=$(sql "SELECT extract(epoch FROM '$FROM'::timestamptz)::bigint")
 echo "| Serviço | Estado | No ar desde | Reinícios automáticos |"
 echo "|---|---|---|---|"
-for s in postgres redis api worker backup web gateway mediamtx prometheus node-exporter; do
+# "motion" (eventos e detector de movimento) só existe a partir da versão com detecção de movimento.
+EXTRA=$(dc config --services 2>/dev/null | grep -x motion || true)
+for s in postgres redis api worker $EXTRA backup web gateway mediamtx prometheus node-exporter; do
   id=$(dc ps -q "$s" 2>/dev/null)
   if [ -z "$id" ]; then echo "| $s | ausente | — | — |"; ATTN+=("serviço $s ausente"); continue; fi
   read -r st hl started rc <<<"$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}} {{.State.StartedAt}} {{.RestartCount}}' "$id")"
@@ -108,7 +110,8 @@ LOWN=$(sql "SELECT count(*) FROM (SELECT camera_id FROM camera_hourly WHERE hour
 # ------------------------------------------------------------------ gravação
 echo "## Gravação contínua"
 echo
-echo "Inclui os segmentos já apagados pela retenção de 24 h (o índice os guarda por 30 dias)."
+echo "Inclui os segmentos já apagados pela retenção (o índice os guarda por 30 dias). Nas câmeras com"
+echo "gravação só com movimento, os trechos sem movimento também contam: foram gravados e apagados depois."
 echo
 echo "| Câmera | Segmentos | Gravado | Cobertura | Lacunas > 10 s | Maior lacuna | Corrompidos/faltando |"
 echo "|---|---|---|---|---|---|---|"
@@ -137,6 +140,26 @@ sql "WITH s AS (
       ORDER BY s.started_at - s.prev_end DESC LIMIT 10" |
   while IFS='|' read -r a b c; do echo "- $a: $c s a partir de $b"; done
 echo
+
+# ------------------------------------------------------------------ movimento e alarme
+if [ "$(sql "SELECT to_regclass('motion_events') IS NOT NULL")" = t ]; then
+  echo "## Movimento e alarme"
+  echo
+  echo "| Câmera | Origem | Movimentos | Avisos | Alarmes enviados | Fora do horário | Intervalo mínimo | Falhas no envio |"
+  echo "|---|---|---|---|---|---|---|---|"
+  sql "SELECT t.name || ' / ' || c.code, string_agg(DISTINCT m.source, ','), count(*), sum(m.hits),
+              count(*) FILTER (WHERE m.alarm_status = 'sent'), count(*) FILTER (WHERE m.alarm_status = 'suppressed_schedule'),
+              count(*) FILTER (WHERE m.alarm_status = 'suppressed_cooldown'), count(*) FILTER (WHERE m.alarm_status = 'failed')
+         FROM motion_events m JOIN cameras c ON c.id = m.camera_id JOIN tenants t ON t.id = c.tenant_id
+        WHERE m.started_at >= '$FROM' AND m.started_at < '$TO'
+        GROUP BY t.name, c.code ORDER BY 1" |
+    while IFS='|' read -r a b c d e f g h; do echo "| $a | $b | $c | $d | $e | $f | $g | $h |"; done
+  echo
+  MFAIL=$(sql "SELECT count(*) FROM motion_events WHERE alarm_status = 'failed' AND started_at >= '$FROM'")
+  [ "${MFAIL:-0}" -gt 0 ] && ATTN+=("$MFAIL alarme(s) de movimento não enviados (conferir o e-mail em Integrações)")
+  DERR=$(sql "SELECT count(*) FROM camera_events WHERE type = 'motion_detector_error' AND occurred_at >= '$FROM'")
+  [ "${DERR:-0}" -gt 0 ] && ATTN+=("detector de movimento do servidor falhou $DERR vez(es)")
+fi
 
 # ------------------------------------------------------------------ alertas e eventos
 echo "## Alertas abertos no período"

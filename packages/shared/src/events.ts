@@ -37,6 +37,11 @@ export const CAMERA_EVENT_TYPES = [
   // segurança (Fase 8)
   "rate_limited",
   "publish_ip_blocked",
+  // movimento e alarme
+  "motion_mail_test",
+  "motion_auth_blocked",
+  "motion_credential_rotated",
+  "motion_detector_error",
 ] as const;
 
 export type CameraEventType = (typeof CAMERA_EVENT_TYPES)[number];

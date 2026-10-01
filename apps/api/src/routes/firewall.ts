@@ -23,6 +23,7 @@ export const PUBLIC_PORTS = [
   { port: "443/tcp", use: "Painel e app (HTTPS)" },
   { port: "1935/tcp", use: "Câmeras enviando vídeo (RTMP)" },
   { port: "1936/tcp", use: "Câmeras enviando vídeo com criptografia (RTMPS)" },
+  { port: "2525/tcp", use: "Câmeras avisando movimento por e-mail (receptor de eventos)" },
   { port: "8189/tcp+udp", use: "Vídeo ao vivo no navegador (WebRTC)" },
 ];
 
