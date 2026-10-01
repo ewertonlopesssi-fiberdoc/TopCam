@@ -205,6 +205,10 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
    - mapa com OpenStreetMap e cor pelo status;
    - se o SGP tiver coordenadas, a localização do cliente vem pela integração.
 5. **Compartilhamento de câmeras** (parentes e vizinhos) e **app mobile**.
+6. **Melhorias de movimento e alarme — depois do app pronto** (decidido em 01/10/2026):
+   - administrador do cliente ajustar o alarme e os horários (hoje só a equipe da plataforma);
+   - cerca/linha virtual como tipo próprio na linha do tempo (conferir antes se o firmware da VIP 1230 FC+ tem; a ficha técnica não lista);
+   - acionar a sirene da câmera pelo app (Mibo): depende de a câmera aceitar comando por protocolo aberto (ONVIF) e de um caminho até ela (agente no local ou VPN). A nuvem da Mibo não tem interface aberta.
 
 ## 7. Fase 1 — Fundação e ingestão RTMP autenticada (detalhe)
 
