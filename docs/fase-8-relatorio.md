@@ -7,7 +7,7 @@ Entregue em partes. Este documento é atualizado a cada parte.
 | 1 | HTTPS (Let's Encrypt), RTMPS, firewall editável no painel | **aprovada na VM em 30/09/2026** (RTMPS pronto, ainda desligado) |
 | 2 | Limite de requisições (rate limit) e rotação de segredos com recriptografia | **implementada e testada no laboratório; aguardando aplicação na VM** |
 | 3 | Backup remoto configurável no painel (SFTP/FTPS/FTP, cifrado) e restauração | **implementada e testada no laboratório; aguardando aplicação na VM e o destino real** |
-| 4 | Restauração em VM limpa, testes de reinício, disco cheio, relatório de 7 dias, aceite | **roteiros prontos e testados no laboratório; execução na VM de teste e na produção pendente** |
+| 4 | Restauração em VM limpa, testes de reinício, disco cheio, relatório de 7 dias, aceite | **aprovada em 01/10/2026** (VM de teste e produção); falta o teste contínuo de 7 dias |
 
 ---
 
@@ -482,3 +482,44 @@ Também observado no laboratório: com o disco real acima de 95%, a gravação p
 ### Validação informal na VM (30/09)
 
 Na mudança da VM 107 para o HD18-TB (desligada, com os dois discos movidos), ela voltou sozinha: os 10 serviços saudáveis, o firewall reaplicado (timer ativo, `"ok": true`) e o IP 45.237.164.6 na loopback.
+
+### Execução em 01/10/2026
+
+**VM de teste limpa (172.31.141.30, Debian 12, 25 GB no HD18-TB)**
+
+| Teste | Resultado |
+|---|---|
+| Instalação do zero (pacote do código + `prepare-vm.sh` + `docker compose up`) | 10 serviços saudáveis |
+| Restauração de um backup real da produção (`topcam-20261001-094610.tar.gpg`, 640 KB) | `--check` íntegro; restaurado em 46 s; 8 clientes, 26 usuários, 18 câmeras, 611 eventos, 3591 segmentos; 18 chaves de câmera, senha do SMTP e senhas do backup legíveis; conferência no navegador ok (login da produção, clientes, câmeras, chave RTMP, eventos, firewall cadastrado, backup automático desligado) |
+| Disco do sistema cheio | D1 (alerta a 90%), D2 (100% por 3 min: painel e API responderam; banco e worker degradaram), D3 (tudo voltou sozinho em 16 s; banco gravando; gravação continuou; 0 arquivos fora do índice), D4 (alerta fechou) |
+| Integridade do banco depois do disco cheio | `pg_amcheck` sem erros (o script não instalava a extensão `amcheck`; corrigido com `--install-missing`) |
+| Reinício da VM | 4/4 (V1, V2, V4, V6; V3 e V5 pulados por não se aplicarem) |
+| Reinício de cada contêiner (R1) | 8 contêineres, de volta em 8–19 s; segmento novo; índice idêntico; 0 fora do índice |
+
+**Observações do teste de disco cheio:**
+
+- Os 61 segmentos marcados como corrompidos são exatamente os do período a 100% (09:57:39–10:00:43). Os de antes e os de depois ficaram conferidos. O sistema detectou e marcou os arquivos que não puderam ser gravados direito, em vez de aceitá-los.
+- Com o disco do sistema a 100%, a proteção de disco apagou gravações antigas (2 × 190 segmentos), porque nessa VM as gravações estavam no disco do sistema. Na produção, as gravações ficam num disco só delas.
+- **No servidor definitivo, manter as gravações num disco ou volume separado do sistema**, como já prevê a especificação.
+- Na VM de teste, durante a construção das imagens, houve alertas de disco lento (64 KiB em 2,1 s) no HD18-TB. Isso será acompanhado no teste de 7 dias, já que a produção agora também está nesse HD.
+
+**Produção (VM 107)**
+
+| Teste | Resultado |
+|---|---|
+| Mudança dos dois discos para o HD18-TB (VM desligada) | voltou sozinha: 10 serviços, firewall reaplicado, IP público na loopback |
+| `accept-phase8.sh --skip-restart` | **6/6**: H1 (Let's Encrypt, 88 dias, redirecionamento, HSTS, cookie seguro), F1, L1, S1, B1 (automático ligado, arquivo abre com a senha), M1 (212/212); R1 feito na VM de teste para não criar lacunas na TWG |
+| Reinício da VM (13:02) | **6/6**: serviços em 6 s, firewall restaurado, painel por HTTPS, TWG gravando de novo em 15 s, 1309 segmentos idênticos |
+
+---
+
+## Acréscimo: retenção de 3 e 7 dias e disco de vídeo de 1 TB
+
+Pedido em 01/10/2026, aproveitando o espaço do HD18-TB.
+
+- **Medição:** a TWG grava 19,3 GB por dia (cerca de 1,8 Mbps). Com 7 dias, são cerca de 135 GB por câmera.
+- **Migração 0010:** cria as opções globais "3 dias" (72 h) e "7 dias" (168 h), ao lado das "24 horas". A escolha continua por câmera, e nada existente muda.
+- **Gravações existentes:** ao trocar a retenção de uma câmera, elas passam a vencer no novo prazo (teste `retention.int.test.ts`).
+- **Disco de vídeo:** de 35 GB para **1 TB**, decisão do Ewe. Cabem cerca de 7 câmeras como a TWG com 7 dias, abaixo de 85%. O aumento é feito com a VM ligada (`qm disk resize` + `resize2fs`). A proteção de disco passa a usar o novo tamanho sozinha.
+- **Observação:** o limite de retenção do plano ainda não é conferido no cadastro da câmera; ele só aparece na tela de Planos. Hoje não há conflito, porque todos os planos aceitam pelo menos 7 dias. Fica registrado para uma fase futura.
+- **Testes:** 214/214.

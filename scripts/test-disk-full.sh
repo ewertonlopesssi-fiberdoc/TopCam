@@ -119,7 +119,7 @@ if [ -n "$FILES" ]; then
   LIST=$(sed "s/'/''/g; s/.*/('&')/" <<<"$FILES" | paste -sd, -)
   ORPH=$(sql "SELECT count(*) FROM (VALUES $LIST) f(p) WHERE NOT EXISTS (SELECT 1 FROM recording_segments s WHERE s.path = f.p)")
 fi
-AMCHECK=$(dc exec -T postgres pg_amcheck -U topcam_owner -d topcam </dev/null 2>&1 | tail -3 | tr '\n' ' '); am_rc=$?
+AMCHECK=$(dc exec -T postgres pg_amcheck -U topcam_owner -d topcam --install-missing </dev/null 2>&1 | tail -3 | tr '\n' ' '); am_rc=$?
 [ -z "$AMCHECK" ] && AMCHECK="nenhum problema"
 record D3 "$([ $h_ok = 1 ] && [ $w_ok = 1 ] && [ $r_ok = 1 ] && [ "${ORPH:-1}" = 0 ] && [ $am_rc = 0 ] && echo PASS || echo FAIL)" \
   "Espaço liberado: tudo volta sozinho, banco grava, gravação continua, índice e banco íntegros" \
