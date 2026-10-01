@@ -27,6 +27,29 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="mosaico"
+        options={{
+          title: "Mosaico",
+          tabBarIcon: ({ color, size }) => <Ionicons name="grid" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="alarmes"
+        options={{
+          title: "Alarmes",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="notifications" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="videos"
+        options={{
+          title: "Meus vídeos",
+          tabBarIcon: ({ color, size }) => <Ionicons name="film" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
         name="conta"
         options={{
           title: "Conta",

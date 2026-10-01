@@ -22,7 +22,8 @@ export default function RootLayout() {
           <Stack.Screen name="trocar-senha" options={{ title: "Trocar senha" }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="camera/[id]" options={{ title: "Ao vivo" }} />
-          <Stack.Screen name="mosaico" options={{ title: "Mosaico" }} />
+          <Stack.Screen name="gravacoes/[id]" options={{ title: "Gravações" }} />
+          <Stack.Screen name="video/[file]" options={{ title: "Vídeo" }} />
         </Stack>
       </AuthProvider>
     </SafeAreaProvider>

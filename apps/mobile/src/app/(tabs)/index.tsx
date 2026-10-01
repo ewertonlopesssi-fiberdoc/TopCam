@@ -1,47 +1,34 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Card, Center, ErrorText, StatusBadge } from "../../components/ui";
-import { ApiError } from "../../lib/api";
-import { useAuth } from "../../lib/auth";
-import { buildTree, isOnline, type Camera } from "../../lib/cameras";
+import { router } from "expo-router";
+import { useMemo, useState } from "react";
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { CameraThumb } from "../../components/camera-thumb";
+import { Center, ErrorText, StatusBadge } from "../../components/ui";
+import { buildTree, isOnline } from "../../lib/cameras";
 import { colors } from "../../lib/theme";
+import { useCameras } from "../../lib/use-cameras";
 
-/** Câmeras liberadas para o usuário, por local e grupo. Atualiza a cada 30 s. */
+/** Câmeras liberadas para o usuário, com a foto de cada uma, por local e grupo. */
 export default function Cameras() {
-  const { api } = useAuth();
-  const [cams, setCams] = useState<Camera[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { cams, error, reload } = useCameras();
   const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState("");
 
-  const load = useCallback(async () => {
-    try {
-      // A API entrega até 100 por página.
-      const all: Camera[] = [];
-      for (let page = 1; page <= 20; page++) {
-        const r = await api.get<{ items: Camera[]; total: number }>(
-          `/api/v1/cameras?pageSize=100&page=${page}`,
-        );
-        all.push(...r.items);
-        if (r.items.length < 100 || all.length >= r.total) break;
-      }
-      setCams(all.filter((c) => c.enabled));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao carregar as câmeras");
-    }
-  }, [api]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-      const t = setInterval(load, 30_000);
-      return () => clearInterval(t);
-    }, [load]),
-  );
-
-  const tree = useMemo(() => buildTree(cams ?? []), [cams]);
+  const tree = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = (cams ?? []).filter(
+      (c) => !q || c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q),
+    );
+    return buildTree(list);
+  }, [cams, search]);
 
   if (!cams && !error)
     return (
@@ -53,18 +40,32 @@ export default function Cameras() {
   return (
     <ScrollView
       contentContainerStyle={st.wrap}
+      keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
           onRefresh={async () => {
             setRefreshing(true);
-            await load();
+            await reload();
             setRefreshing(false);
           }}
         />
       }
     >
       <ErrorText>{error}</ErrorText>
+      {cams && cams.length > 4 && (
+        <View style={st.search}>
+          <Ionicons name="search" size={18} color={colors.muted} />
+          <TextInput
+            style={st.searchInput}
+            placeholder="Pesquisar câmera"
+            placeholderTextColor="#94a3b8"
+            value={search}
+            onChangeText={setSearch}
+            accessibilityLabel="Pesquisar câmera"
+          />
+        </View>
+      )}
       {cams && cams.length === 0 && (
         <Center>
           <Ionicons name="videocam-off-outline" size={40} color={colors.muted} />
@@ -80,7 +81,7 @@ export default function Cameras() {
           {sec.groups.map((g) => {
             const online = g.cameras.filter((c) => isOnline(c.status));
             return (
-              <Card key={g.key}>
+              <View key={g.key} style={{ gap: 8 }}>
                 <View style={st.groupHead}>
                   <Text style={st.groupTitle}>{g.title}</Text>
                   {online.length >= 2 && (
@@ -89,10 +90,7 @@ export default function Cameras() {
                       accessibilityLabel={`Mosaico de ${g.title}`}
                       style={st.mosaicBtn}
                       onPress={() =>
-                        router.push({
-                          pathname: "/mosaico",
-                          params: { ids: online.map((c) => c.id).join(","), title: g.title },
-                        })
+                        router.navigate({ pathname: "/(tabs)/mosaico", params: { group: g.key } })
                       }
                     >
                       <Ionicons name="grid" size={14} color={colors.primary} />
@@ -100,7 +98,7 @@ export default function Cameras() {
                     </Pressable>
                   )}
                 </View>
-                {g.cameras.map((c, i) => (
+                {g.cameras.map((c) => (
                   <Pressable
                     key={c.id}
                     testID="camera-row"
@@ -109,30 +107,19 @@ export default function Cameras() {
                     onPress={() =>
                       router.push({ pathname: "/camera/[id]", params: { id: c.id, name: c.name } })
                     }
-                    style={({ pressed }) => [
-                      st.row,
-                      i > 0 && st.rowLine,
-                      pressed && { backgroundColor: "#f8fafc" },
-                    ]}
+                    style={({ pressed }) => [st.row, pressed && { opacity: 0.8 }]}
                   >
-                    <View style={st.thumb}>
-                      <Ionicons
-                        name="videocam"
-                        size={20}
-                        color={isOnline(c.status) ? colors.primary : colors.muted}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={st.name} numberOfLines={1}>
+                    <CameraThumb cameraId={c.id} style={st.thumb} />
+                    <View style={st.info}>
+                      <Text style={st.name} numberOfLines={2}>
                         {c.name}
                       </Text>
                       <Text style={st.code}>{c.code}</Text>
+                      <StatusBadge status={c.status} />
                     </View>
-                    <StatusBadge status={c.status} />
-                    <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
                   </Pressable>
                 ))}
-              </Card>
+              </View>
             );
           })}
         </View>
@@ -144,18 +131,20 @@ export default function Cameras() {
 const st = StyleSheet.create({
   wrap: { padding: 16, gap: 18, flexGrow: 1 },
   empty: { color: colors.muted, textAlign: "center" },
-  secHead: { flexDirection: "row", alignItems: "center", gap: 6 },
-  secTitle: { fontSize: 16, fontWeight: "700", color: colors.ink },
-  groupHead: {
+  search: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: "#f8fafc",
-    borderBottomWidth: 1,
-    borderBottomColor: colors.line,
+    gap: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    paddingHorizontal: 12,
   },
+  searchInput: { flex: 1, height: 44, fontSize: 16, color: colors.ink },
+  secHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+  secTitle: { fontSize: 16, fontWeight: "700", color: colors.ink },
+  groupHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   groupTitle: { fontSize: 13, fontWeight: "600", color: colors.muted, textTransform: "uppercase" },
   mosaicBtn: {
     flexDirection: "row",
@@ -167,20 +156,15 @@ const st = StyleSheet.create({
   mosaicText: { color: colors.primary, fontWeight: "600", fontSize: 13 },
   row: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    overflow: "hidden",
   },
-  rowLine: { borderTopWidth: 1, borderTopColor: colors.line },
-  thumb: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: "#eef4ff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  thumb: { width: 150, aspectRatio: 16 / 9 },
+  info: { flex: 1, paddingVertical: 10, paddingRight: 10, gap: 4, alignItems: "flex-start" },
   name: { fontSize: 16, fontWeight: "600", color: colors.ink },
   code: { fontSize: 12, color: colors.muted },
 });

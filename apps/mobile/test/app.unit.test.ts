@@ -144,3 +144,35 @@ describe("telas", () => {
     expect(passwordProblem("Abcdefg1")).toBeNull();
   });
 });
+
+describe("gravações: datas de Brasília e trechos", () => {
+  it("dia, início do dia e relógio no horário de Brasília", async () => {
+    const { dayOf, dayStart, clock, whenLabel, addDays } = await import("../src/lib/time");
+    // 01/10 23:30 em Brasília = 02/10 02:30 UTC
+    const t = Date.parse("2026-10-02T02:30:00Z");
+    expect(dayOf(t)).toBe("2026-10-01");
+    expect(dayStart("2026-10-01")).toBe(Date.parse("2026-10-01T03:00:00Z"));
+    expect(clock(t)).toBe("23:30:00");
+    expect(whenLabel(t, t + 3600_000)).toBe("ontem 23:30");
+    expect(whenLabel(t, t + 60_000)).toBe("hoje 23:30");
+    expect(addDays("2026-10-31", 1)).toBe("2026-11-01");
+  });
+
+  it("blocos contínuos e trecho a reproduzir (até 15 min, pula lacuna)", async () => {
+    const { toSpans, chunkFrom } = await import("../src/lib/time");
+    const iso = (s: number) => new Date(1_000_000_000_000 + s * 1000).toISOString();
+    const spans = toSpans([
+      { startedAt: iso(0), endedAt: iso(60) },
+      { startedAt: iso(61), endedAt: iso(120) }, // encosta (1 s): mesmo bloco
+      { startedAt: iso(300), endedAt: iso(2400) }, // depois de uma lacuna
+    ]);
+    expect(spans.length).toBe(2);
+    const base = 1_000_000_000_000;
+    expect(chunkFrom(spans, base + 30_000)).toEqual({ start: base + 30_000, end: base + 120_000 });
+    // Na lacuna: vai para o próximo bloco; no máximo 900 s.
+    const c = chunkFrom(spans, base + 200_000)!;
+    expect(c.start).toBe(base + 300_005);
+    expect(c.end - c.start).toBe(900_000);
+    expect(chunkFrom(spans, base + 3_000_000)).toBeNull();
+  });
+});

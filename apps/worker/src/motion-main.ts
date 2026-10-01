@@ -6,6 +6,7 @@ import { pino } from "pino";
 import { z } from "zod";
 import { createEventsSmtpServer } from "./events/smtp.js";
 import { MotionManager } from "./motion/manager.js";
+import { SnapshotGrabber } from "./motion/snapshots.js";
 
 /**
  * Serviço de movimento (contêiner "motion"), separado do worker para não disputar CPU:
@@ -29,6 +30,9 @@ const env = z
     MEDIA_READ_PASSWORD: z.string().min(24),
     MOTION_SYNC_S: z.coerce.number().positive().default(15),
     MOTION_MAX_DETECTORS: z.coerce.number().int().positive().default(64),
+    /** Fotos das câmeras (lista do app). */
+    SNAPSHOT_DIR: z.string().default("/snapshots"),
+    SNAPSHOT_INTERVAL_S: z.coerce.number().int().min(30).default(300),
   })
   .parse(process.env);
 
@@ -78,6 +82,14 @@ const rtspBase = env.MEDIAMTX_RTSP_URL.replace(
   `rtsp://${encodeURIComponent(env.MEDIA_READ_USER)}:${encodeURIComponent(env.MEDIA_READ_PASSWORD)}@`,
 );
 const manager = new MotionManager({ pool, log, rtspBase, maxDetectors: env.MOTION_MAX_DETECTORS });
+const snapshots = new SnapshotGrabber({
+  pool,
+  log,
+  dir: env.SNAPSHOT_DIR,
+  rtspBase,
+  intervalS: env.SNAPSHOT_INTERVAL_S,
+});
+let snapping = false;
 let stopping = false;
 let lastCount = -1;
 async function syncLoop() {
@@ -86,6 +98,17 @@ async function syncLoop() {
     const r = await manager.sync();
     if (r.running !== lastCount) log.info(r, "detector de movimento: câmeras");
     lastCount = r.running;
+    // Fotos em segundo plano (uma rodada por vez).
+    if (!snapping) {
+      snapping = true;
+      void snapshots
+        .sync()
+        .then((s) => s.taken + s.failed > 0 && log.debug(s, "fotos das câmeras"))
+        .catch((err) => log.warn({ err: (err as Error).message }, "fotos: falha"))
+        .finally(() => {
+          snapping = false;
+        });
+    }
     // Heartbeat para o healthcheck do contêiner.
     await writeFile("/tmp/motion-heartbeat", String(Date.now())).catch(() => undefined);
   } catch (err) {

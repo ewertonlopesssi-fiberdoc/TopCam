@@ -54,6 +54,16 @@ export class ApiClient {
     return /^https?:\/\//.test(path) ? path : `${this.baseUrl}${path}`;
   }
 
+  /** Cabeçalho de autorização para pedidos feitos fora deste cliente (imagens, downloads). */
+  authHeaders(): Record<string, string> {
+    return this.accessToken ? { authorization: `Bearer ${this.accessToken}` } : {};
+  }
+
+  /** Garante um token de acesso válido antes de baixar imagens ou arquivos. */
+  async ensureFresh(): Promise<void> {
+    await this.get("/api/v1/auth/me");
+  }
+
   private async raw(method: string, path: string, body?: unknown, auth = true): Promise<Response> {
     const headers: Record<string, string> = { accept: "application/json" };
     if (body !== undefined) headers["content-type"] = "application/json";

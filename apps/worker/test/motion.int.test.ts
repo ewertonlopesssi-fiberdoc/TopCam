@@ -465,3 +465,60 @@ describe("detector do servidor (ffmpeg de verdade)", () => {
     expect(r.hits).toBe(0);
   });
 });
+
+describe("fotos das câmeras (lista do app)", () => {
+  it("tira a foto das câmeras no ar, renova só depois do intervalo e apaga as de câmeras excluídas", async () => {
+    const { SnapshotGrabber } = await import("../src/motion/snapshots.js");
+    const src = mkdtempSync(join(tmpdir(), "topcam-snapsrc-"));
+    const out = mkdtempSync(join(tmpdir(), "topcam-snapout-"));
+    mkdirSync(join(src, "cam"));
+    execFileSync("ffmpeg", [
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=size=1280x720:rate=10",
+      "-t",
+      "2",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:v",
+      "libx264",
+      "-f",
+      "mp4",
+      join(src, "cam", cam1),
+    ]);
+    await ownerQuery(db, "UPDATE cameras SET status = 'aguardando_transmissao'");
+    await ownerQuery(db, "UPDATE cameras SET status = 'ao_vivo', enabled = true WHERE id = $1", [
+      cam1,
+    ]);
+    const g = new SnapshotGrabber({
+      pool,
+      log: pino({ level: "silent" }),
+      dir: out,
+      rtspBase: src,
+      intervalS: 300,
+    });
+    expect(await g.due()).toEqual([cam1]);
+    expect(await g.sync()).toEqual({ taken: 1, failed: 0 });
+    const jpg = join(out, `${cam1}.jpg`);
+    const probe = execFileSync(
+      "ffprobe",
+      ["-v", "error", "-show_entries", "stream=codec_name,width,height", "-of", "csv=p=0", jpg],
+      { encoding: "utf8" },
+    ).trim();
+    expect(probe).toBe("mjpeg,480,270");
+    // Ainda nova: não tira de novo.
+    expect(await g.due()).toEqual([]);
+    // Depois de 5 min, sim.
+    expect(await g.due(Date.now() + 301_000)).toEqual([cam1]);
+    // Câmera excluída: a foto some na limpeza.
+    writeFileSync(join(out, "00000000-0000-4000-8000-000000000000.jpg"), "x");
+    expect(await g.cleanup()).toBe(1);
+    expect(existsSync(jpg)).toBe(true);
+    rmSync(src, { recursive: true, force: true });
+    rmSync(out, { recursive: true, force: true });
+  });
+});

@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createPool, type Pool } from "@topcam/db";
 import type { MediaMtxClient } from "@topcam/shared";
@@ -19,6 +22,7 @@ import { loadEnv } from "../src/env.js";
  * linha do tempo com movimento e trechos sem movimento, e transferência.
  */
 
+const SNAP_DIR = mkdtempSync(join(tmpdir(), "topcam-snap-"));
 let db: TestDb;
 let pool: Pool;
 let redis: Redis;
@@ -40,6 +44,7 @@ beforeAll(async () => {
       JWT_SECRET: randomBytes(32).toString("hex"),
       PANEL_URL: "http://painel.teste",
       LOG_LEVEL: "silent",
+      SNAPSHOT_DIR: SNAP_DIR,
     }),
     pool,
     redis,
@@ -268,6 +273,62 @@ describe("linha do tempo com movimento", () => {
     ]);
     // Só a lacuna real (300 s → 600 s).
     expect(j.gaps.map((g: { seconds: number }) => g.seconds)).toEqual([300]);
+  });
+});
+
+describe("app: foto da câmera e alarmes", () => {
+  let viewer = "";
+  let camA = "";
+  let camB = "";
+  beforeAll(async () => {
+    const rows = await sql<{ id: string; code: string }>(
+      "SELECT id, code FROM cameras WHERE tenant_id = $1 AND code IN ('CAM-001', 'CAM-002') ORDER BY code",
+      [alfa],
+    );
+    camA = rows[0]!.id;
+    camB = rows[1]!.id;
+    const u = await api(admin).post("/api/v1/users", {
+      name: "Porteiro",
+      email: "porteiro@alfa.test",
+      role: "viewer",
+      tenantId: alfa,
+      password: "Porteiro123",
+    });
+    await api(admin).put(`/api/v1/users/${u.json().user.id}/camera-permissions`, {
+      items: [{ cameraId: camA, canLive: true }],
+    });
+    viewer = await login("porteiro@alfa.test", "Porteiro123");
+    await sql(
+      `INSERT INTO motion_events (tenant_id, camera_id, source, kind, started_at, ended_at)
+       VALUES ($1, $2, 'camera', 'human', now() - interval '5 minutes', now() - interval '4 minutes'),
+              ($1, $3, 'server', 'motion', now() - interval '3 minutes', now() - interval '2 minutes')`,
+      [alfa, camA, camB],
+    );
+  });
+
+  it("foto: 404 sem foto; depois entrega o JPEG só a quem vê a câmera", async () => {
+    expect((await api(viewer).get(`/api/v1/cameras/${camA}/snapshot`)).statusCode).toBe(404);
+    writeFileSync(join(SNAP_DIR, `${camA}.jpg`), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    writeFileSync(join(SNAP_DIR, `${camB}.jpg`), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const r = await api(viewer).get(`/api/v1/cameras/${camA}/snapshot`);
+    expect(r.statusCode).toBe(200);
+    expect(r.headers["content-type"]).toBe("image/jpeg");
+    expect(r.headers["x-snapshot-at"]).toBeTruthy();
+    // Câmera não liberada para ele.
+    expect((await api(viewer).get(`/api/v1/cameras/${camB}/snapshot`)).statusCode).toBe(404);
+  });
+
+  it("alarmes: visualizador só vê os movimentos das câmeras dele; admin vê todos", async () => {
+    const v = (await api(viewer).get("/api/v1/motion-events")).json();
+    expect(v.items.map((x: { cameraId: string }) => x.cameraId)).toEqual([camA]);
+    expect(v.items[0]).toMatchObject({ kind: "human", canPlayback: false, code: "CAM-001" });
+    const a = (
+      await api(admin).get(
+        `/api/v1/motion-events?since=${encodeURIComponent(new Date(Date.now() - 600_000).toISOString())}`,
+      )
+    ).json();
+    expect(a.items.length).toBeGreaterThanOrEqual(2);
+    expect(a.items[0].cameraId).toBe(camB); // mais recente primeiro
   });
 });
 

@@ -32,7 +32,7 @@ const asset = (f: string) => `./brands/${brandId}/generated/${f}`;
 const version = (
   JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { version: string }
 ).version;
-const buildNumber = 1;
+const buildNumber = 2;
 
 const config: ExpoConfig = {
   name: brand.name,
@@ -71,6 +71,13 @@ const config: ExpoConfig = {
       },
     ],
     "expo-secure-store",
+    [
+      "expo-media-library",
+      {
+        savePhotosPermission: "Permitir salvar os vídeos baixados das câmeras na galeria.",
+        isAccessMediaLocationEnabled: false,
+      },
+    ],
     ["expo-video", { supportsBackgroundPlayback: false, supportsPictureInPicture: false }],
     [
       "expo-build-properties",

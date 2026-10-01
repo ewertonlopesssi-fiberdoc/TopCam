@@ -52,6 +52,8 @@ const schema = z.object({
 
   /** Cópias locais do backup (montadas só leitura; download pelo painel). */
   BACKUP_DIR: z.string().default("/backups"),
+  /** Fotos das câmeras tiradas pelo serviço motion (só leitura aqui). */
+  SNAPSHOT_DIR: z.string().default("/snapshots"),
 
   // ---- ao vivo (Fase 3)
   /** Validade do endereço temporário do ao vivo. A sessão e a permissão são reconferidas a cada acesso. */

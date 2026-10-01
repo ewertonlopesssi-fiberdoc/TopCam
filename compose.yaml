@@ -109,6 +109,8 @@ services:
     # Cópias locais do backup, só leitura (download pelo painel, Fase 8).
     volumes:
       - ./.data/backups:/backups:ro
+      # Fotos das câmeras (tiradas pelo serviço motion), só leitura.
+      - ./.data/snapshots:/snapshots:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -163,7 +165,11 @@ services:
     volumes:
       # Certificado do painel (copiado pelo serviço do host) para o STARTTLS.
       - ./.data/tls:/tls:ro
+      # Foto de cada câmera no ar, a cada 5 min (lista de câmeras do app).
+      - ./.data/snapshots:/snapshots
     depends_on:
+      storage-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
     healthcheck:
@@ -223,8 +229,10 @@ services:
       - -c
       - mkdir -p /recordings/cam && chown -R 1000:1000 /recordings && chmod 0750 /recordings
         && mkdir -p /backups && chown 0:1000 /backups && chmod 0750 /backups
+        && mkdir -p /snapshots && chown 1000:1000 /snapshots && chmod 0750 /snapshots
     volumes:
       - ${RECORDINGS_DIR:-./.data/recordings}:/recordings
+      - ./.data/snapshots:/snapshots
       - ./.data/backups:/backups
 
   mediamtx:

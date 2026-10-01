@@ -1,3 +1,5 @@
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   insertCameraEvent,
   nextCameraCode,
@@ -500,6 +502,25 @@ export async function cameraRoutes(app: FastifyInstance): Promise<void> {
     });
     await wakeWorker(app);
     return { ok: true };
+  });
+
+  // ------------------------------------------------------------------ foto da câmera
+  /**
+   * Última foto da câmera (tirada pelo serviço motion a cada 5 min enquanto ela está no ar).
+   * Só para quem vê a câmera. `X-Snapshot-At` traz o horário da foto.
+   */
+  app.get<{ Params: { id: string } }>("/api/v1/cameras/:id/snapshot", read, async (req, reply) => {
+    const id = parseBody(uuid, req.params.id);
+    await db(app, req, (c) => loadCamera(c, req, id));
+    const file = join(env.SNAPSHOT_DIR, `${id}.jpg`);
+    const st = await stat(file).catch(() => null);
+    if (!st?.size) throw notFound("Ainda não há foto desta câmera");
+    return reply
+      .header("content-type", "image/jpeg")
+      .header("cache-control", "private, max-age=60")
+      .header("last-modified", st.mtime.toUTCString())
+      .header("x-snapshot-at", st.mtime.toISOString())
+      .send(await readFile(file));
   });
 
   // ------------------------------------------------------------------ credencial de eventos

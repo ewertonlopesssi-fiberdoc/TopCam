@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Stack, useLocalSearchParams } from "expo-router";
-import { useRef, useState } from "react";
+import { Stack, router, useIsFocused, useLocalSearchParams } from "expo-router";
+import { useAuth } from "../../lib/auth";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { LivePlayer } from "../../components/live-player";
 import { colors } from "../../lib/theme";
@@ -12,12 +13,23 @@ export default function CameraLive() {
   const full = useRef<(() => void) | null>(null);
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
+  // Com as gravações abertas por cima, o ao vivo para.
+  const focused = useIsFocused();
+  const { api } = useAuth();
+  // Botão "Gravações" só se o usuário pode reproduzir esta câmera e ela grava.
+  const [canPlay, setCanPlay] = useState(false);
+  useEffect(() => {
+    api
+      .get<{ segments: number }>(`/api/v1/cameras/${id}/recordings/summary`)
+      .then((s) => setCanPlay(s.segments > 0))
+      .catch(() => setCanPlay(false));
+  }, [api, id]);
 
   return (
     <View style={{ flex: 1, backgroundColor: landscape ? "#000" : colors.bg }}>
       <Stack.Screen options={{ title: name ?? "Ao vivo", headerShown: !landscape }} />
       <View style={landscape ? { flex: 1 } : { width, height: (width * 9) / 16 }}>
-        <LivePlayer cameraId={id} muted={muted} fullscreenRef={full} />
+        {focused && <LivePlayer cameraId={id} muted={muted} fullscreenRef={full} />}
       </View>
       {!landscape && (
         <View style={st.bar}>
@@ -38,6 +50,21 @@ export default function CameraLive() {
           >
             <Ionicons name="expand" size={22} color={colors.ink} />
             <Text style={st.btnText}>Tela cheia</Text>
+          </Pressable>
+        </View>
+      )}
+      {!landscape && canPlay && (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+          <Pressable
+            style={st.btn}
+            accessibilityRole="button"
+            accessibilityLabel="Gravações"
+            onPress={() =>
+              router.push({ pathname: "/gravacoes/[id]", params: { id, name: name ?? "" } })
+            }
+          >
+            <Ionicons name="film" size={22} color={colors.ink} />
+            <Text style={st.btnText}>Gravações</Text>
           </Pressable>
         </View>
       )}

@@ -19,6 +19,7 @@ import { healthRoutes } from "./routes/health.js";
 import { liveRoutes } from "./routes/live.js";
 import { locationRoutes } from "./routes/locations.js";
 import { mediamtxRoutes } from "./routes/mediamtx.js";
+import { motionRoutes } from "./routes/motion.js";
 import { recordingRoutes } from "./routes/recordings.js";
 import { tenantRoutes } from "./routes/tenants.js";
 import { userRoutes } from "./routes/users.js";
@@ -84,6 +85,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(cameraRoutes);
   await app.register(liveRoutes);
   await app.register(recordingRoutes);
+  await app.register(motionRoutes);
   await app.register(adminRoutes);
   await app.register(storageRoutes);
   await app.register(integrationRoutes);
