@@ -127,3 +127,17 @@
 - Pendências do Ewe:
   - apagar a chave `38f5c1d6…`;
   - ~~religar a política `iam.disableServiceAccountKeyCreation`~~ — feito (02/10, "Herdar", status Aplicada).
+
+## Recuperação do código (21/11/2026)
+
+- O ambiente de trabalho do desenvolvimento foi reiniciado, e a cópia local do código depois da 9.2 se perdeu.
+- O código foi remontado a partir de três fontes:
+  - o código da produção (1186542);
+  - o pacote da 9.2 (`topcam-app92-servidor.bundle`);
+  - o app 0.3.0 (`topcam-mobile-0.3.0.zip`), mais o histórico da sessão (servidor do push, script de assinatura, versão 0.3.1).
+- **Conferência:**
+  - suíte completa 283/283, igual à de antes;
+  - lint, tipagem e formatação sem erros;
+  - laboratório do zero: as 12 migrations aplicadas e os serviços saudáveis;
+  - push ponta a ponta: e-mail de movimento da câmera → alarme → push no serviço falso, mais a notificação de teste pela API.
+- **Produção:** a VM 107 continua em 1186542. A 9.2 e a 9.3 seguem juntas no pacote `topcam-app92-93-servidor.bundle` (1186542..main).
