@@ -141,3 +141,9 @@
   - laboratório do zero: as 12 migrations aplicadas e os serviços saudáveis;
   - push ponta a ponta: e-mail de movimento da câmera → alarme → push no serviço falso, mais a notificação de teste pela API.
 - **Produção:** a VM 107 continua em 1186542. A 9.2 e a 9.3 seguem juntas no pacote `topcam-app92-93-servidor.bundle` (1186542..main).
+
+## Produção (21/11/2026)
+
+- Pacote 9.2 + 9.3 aplicado na VM 107 (commit d4cddc6), com a migration 0012 e todos os serviços saudáveis. Enviado ao GitHub.
+- **Notificação de teste chegou no celular** (app 0.3.1, Android).
+- Falta o teste com alarme real, quando houver câmera com detecção de movimento e alarme ligados. As câmeras de teste foram retiradas.
