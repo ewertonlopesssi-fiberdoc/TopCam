@@ -217,7 +217,6 @@ describe("gravações: datas de Brasília e trechos", () => {
     const live = [{ from: at(14, 0), to: now - 90_000 }];
     expect(checkRange(live, at(14, 50), at(15, 0), now).missing).toEqual([]);
   });
-
 });
 
 describe("ao vivo por WebRTC", () => {
