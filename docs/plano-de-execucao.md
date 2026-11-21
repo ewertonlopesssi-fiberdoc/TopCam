@@ -181,7 +181,20 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
 
 ---
 
-### 6.1 Ordem combinada após a Fase 7 (30/09/2026)
+### 6.0 Ordem decidida em 21/11/2026 (vale sobre a 6.1)
+
+Produção atualizada com a 9.2 e a 9.3 em 21/11/2026 (commit d4cddc6, migration 0012). Ordem até "funcional para produção":
+
+1. Teste do app 0.3.1 no celular (push, alarmes).
+2. **Backup:** destino externo de verdade, troca das senhas e chaves internas (`rotate-secrets.sh --all`) e fechamento da Fase 8.
+3. **Localização + mapa** (item 5 da 6.1, sem depender do SGP).
+4. **Publicação do app (9.4):** nome e imagem definitivos (o nome "TopCam" já existe na Play Store).
+5. **Teste de carga e Fase 10:** 50 e 100 câmeras simuladas, dimensionamento do servidor definitivo, roteiro de migração.
+
+**Depois, como atualizações:** integração SGP e os itens da lista (marca do provedor, áudio por câmera, melhorias de movimento, compartilhamento, IA de placa e rosto).
+
+**Em análise (sem implementar):** instalação em servidor de outro provedor, app neutro e app com a marca do provedor, licença com bloqueio por falta de pagamento e atualizações com pouco impacto. Ver `analise-multiprovedor-licenca-atualizacao.md`.
+
 
 1. Ajustes da Fase 7 já entregues em pacotes:
    - senha no cadastro e envio de acesso por e-mail;
