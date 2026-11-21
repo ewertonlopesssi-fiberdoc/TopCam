@@ -112,3 +112,48 @@ O app hoje aponta para um servidor fixo, definido na hora de gerar o APK. Para u
   - se a gravação continua durante o bloqueio.
 - **Quais modelos oferecer:** só hospedado, só no servidor do provedor, ou os dois.
 - **Onde fica o servidor central:** é pequeno e pode ficar na própria VM da SuporTI ou separado. Ele precisa ficar sempre no ar, porque os apps neutros dependem dele no primeiro acesso.
+
+---
+
+## Decisões de 21/11/2026
+
+- **Modelos:** oferecer os dois, **no servidor do provedor** e **hospedado por nós**.
+- **Bloqueio, no início:** feito por nós **via SSH** na VM do provedor (já temos acesso). Precisa de um comando simples que coloque a instalação inteira em "aviso", "restrito" ou "suspenso", com a mensagem no painel e no app, sem apagar nada. A licença automática (seção 3) fica para quando tivermos o nosso servidor central mais robusto.
+  - Depende de mantermos o acesso SSH. Isso deve estar no contrato (o provedor não pode remover o nosso acesso).
+
+## Como o app neutro conversa com o servidor do provedor
+
+O app conversa **direto** com o servidor do provedor, para login, câmeras, ao vivo, gravações e download. O vídeo **nunca passa por nós**.
+
+O nosso servidor central entra só em dois momentos:
+
+1. **Primeiro acesso (diretório):** o cliente digita o código do provedor. O app pergunta ao central e recebe o endereço do servidor, o nome, o logo e as cores. O app guarda isso e daí em diante fala só com o servidor do provedor. Se o provedor mudar de endereço, basta atualizar o diretório: o app confere ao abrir.
+2. **Push (relé):** o celular registra o endereço de push no servidor do provedor, como hoje. Quando o alarme dispara, o servidor do provedor manda o aviso para o relé central, autenticado pela chave da instalação, e o relé entrega pela Expo. O relé só vê o texto da notificação (câmera, local, horário), nunca imagens.
+
+```
+Celular (app neutro)
+   │ 1º acesso: código "provedorx" ──► Central (diretório) ──► endereço + marca
+   │
+   └─ login, câmeras, ao vivo, gravações ──► Servidor do provedor (HTTPS, WebRTC/HLS)
+                                                   │ alarme
+                                                   ▼
+                                     Central (relé de push) ──► Expo ──► Celular
+```
+
+**Se o central sair do ar:** quem já entrou continua usando o app normalmente. Só o primeiro acesso de um cliente novo e o push ficam afetados até ele voltar.
+
+**Modelo hospedado:** é o mesmo fluxo. O diretório aponta para o nosso servidor, e o código identifica a marca do provedor.
+
+**Requisitos no servidor do provedor (os mesmos da VM 107):**
+
+- domínio com HTTPS válido;
+- portas 443, 1935 e 8189 (WebRTC);
+- versão do sistema compatível com o app.
+
+**O que muda no app:**
+
+- tela "Código do provedor" no primeiro acesso;
+- endereço do servidor dinâmico (hoje é fixo no APK), guardado no celular;
+- opção "trocar de provedor" em Conta.
+
+O restante do app (telas, ao vivo, gravações, push) já funciona com qualquer servidor.
