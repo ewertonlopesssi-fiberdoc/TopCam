@@ -97,3 +97,68 @@ export function chunkFrom(
   const start = Math.max(at, span.from + 5);
   return { start, end: Math.min(span.to, start + maxS * 1000) };
 }
+
+/** Segundos desde a meia-noite (Brasília) do instante. */
+export function secOfDay(ms: number): number {
+  const d = (ms - BR_OFFSET_MS) % 86_400_000;
+  return Math.floor((d < 0 ? d + 86_400_000 : d) / 1000);
+}
+
+/** Instante (ms UTC) do dia (Brasília) mais `sec` segundos. */
+export function atDaySec(day: string, sec: number): number {
+  return dayStart(day) + sec * 1000;
+}
+
+export interface RangeCheck {
+  /** Impede o download. */
+  error: string | null;
+  /** Fim usado (cortado para "agora" se estiver no futuro). */
+  end: number;
+  /** Fim foi cortado para o último segundo gravado. */
+  clamped: boolean;
+  /** Intervalos sem gravação dentro do trecho (o vídeo pula esses intervalos). */
+  missing: Span[];
+}
+
+/**
+ * Confere um trecho para baixar: fim depois do início, no máximo `maxS` (limite do servidor),
+ * nada no futuro e alguma gravação no meio. Lacunas menores que 3 s são ignoradas.
+ */
+export function checkRange(
+  spans: Span[],
+  start: number,
+  end: number,
+  now = Date.now(),
+  maxS = 3600,
+): RangeCheck {
+  const limit = now - 5000;
+  const clamped = end > limit;
+  const e = Math.min(end, limit);
+  const out: RangeCheck = { error: null, end: e, clamped, missing: [] };
+  if (start >= limit) return { ...out, error: "O início ainda não foi gravado." };
+  if (end <= start) return { ...out, error: "O fim precisa ser depois do início." };
+  if ((e - start) / 1000 > maxS)
+    return {
+      ...out,
+      error: `O trecho pode ter no máximo ${Math.round(maxS / 60)} minutos. Baixe em partes.`,
+    };
+  let at = start;
+  let covered = 0;
+  for (const s of spans) {
+    if (s.to <= start || s.from >= e) continue;
+    const from = Math.max(s.from, start);
+    const to = Math.min(s.to, e);
+    if (from - at >= 3000) out.missing.push({ from: at, to: from });
+    covered += to - from;
+    at = Math.max(at, to);
+  }
+  // O final recente ainda está sendo gravado (o segmento só entra depois de fechado): não avisa.
+  if (e - at >= 3000 && at < now - 180_000) out.missing.push({ from: at, to: e });
+  if (covered <= 0)
+    return {
+      ...out,
+      missing: [],
+      error: `Não há gravação entre ${clock(start)} e ${clock(e)}.`,
+    };
+  return out;
+}

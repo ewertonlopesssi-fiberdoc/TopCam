@@ -10,8 +10,11 @@
 #   --api-url   outro servidor (ex.: http://172.31.141.30 no laboratório); padrão: o da marca
 #   --all-abis  também celulares 32 bits (armeabi-v7a). Padrão: só arm64-v8a (mais rápido)
 #
-# Saída: reports/apk/<marca>-<versão>.apk. É um APK de TESTE (assinado com a chave de
-# depuração): instala direto no celular, mas não vai para a Play Store (isso é a 9.4).
+# Assinatura: com TOPCAM_KEYSTORE e TOPCAM_KEYSTORE_PASSWORD (e opcionalmente TOPCAM_KEY_ALIAS),
+# o APK sai assinado com a chave oficial da marca (a mesma das atualizações e da Play Store).
+# Sem elas, sai com a chave de depuração (só para teste; não atualiza um app oficial).
+#
+# Saída: reports/apk/<marca>-<versão>.apk.
 set -euo pipefail
 cd "$(dirname "$0")/../apps/mobile"
 
@@ -21,7 +24,7 @@ while [ $# -gt 0 ]; do
     --brand) BRAND="$2"; shift 2 ;;
     --api-url) API_URL="$2"; shift 2 ;;
     --all-abis) ABIS=armeabi-v7a,arm64-v8a; shift ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "opção desconhecida: $1" >&2; exit 2 ;;
   esac
 done
@@ -35,6 +38,11 @@ npm ci --no-audit --no-fund
 # O projeto nativo é gerado a cada build a partir da configuração da marca (não é versionado).
 npx expo prebuild --platform android --clean --no-install
 echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+if [ -n "${TOPCAM_KEYSTORE:-}" ]; then
+  python3 scripts/apply-signing.py
+else
+  echo "AVISO: sem TOPCAM_KEYSTORE — APK assinado com a chave de depuração (só teste)" >&2
+fi
 sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m/' android/gradle.properties
 (cd android && ./gradlew assembleRelease -PreactNativeArchitectures="$ABIS")
 

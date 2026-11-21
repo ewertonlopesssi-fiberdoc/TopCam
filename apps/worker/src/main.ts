@@ -31,7 +31,7 @@ import {
   notifyAlerts,
   sampleStatus,
 } from "./jobs/monitor.js";
-import { keepMotion, processAlarms } from "./jobs/motion.js";
+import { checkPushReceipts, keepMotion, processAlarms } from "./jobs/motion.js";
 import { reconcileMediaServer } from "./jobs/reconcile.js";
 import { checkStorage, newStorageState } from "./jobs/storage.js";
 import { runFfprobe } from "./lib/ffprobe.js";
@@ -202,6 +202,10 @@ every(20, "motion-keep", async () => {
 every(5, "alarms", async () => {
   const r = await processAlarms(ctx);
   if (r.notified || r.failed) log.info(r, "alarme");
+});
+every(env.PUSH_RECEIPTS_INTERVAL_S, "push-receipts", async () => {
+  const r = await checkPushReceipts(ctx);
+  if (r.failed || r.disabled) log.warn(r, "push: recibos com falha");
 });
 
 every(60, "housekeeping", async () => {

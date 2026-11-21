@@ -175,4 +175,84 @@ describe("gravações: datas de Brasília e trechos", () => {
     expect(c.end - c.start).toBe(900_000);
     expect(chunkFrom(spans, base + 3_000_000)).toBeNull();
   });
+
+  it("baixar trecho: horário do dia, das/às, limite de 60 min, futuro e lacunas", async () => {
+    const { secOfDay, atDaySec, checkRange, clock } = await import("../src/lib/time");
+    const t = Date.parse("2026-10-01T16:22:01Z"); // 13:22:01 em Brasília
+    expect(secOfDay(t)).toBe(13 * 3600 + 22 * 60 + 1);
+    expect(atDaySec("2026-10-01", secOfDay(t))).toBe(t);
+    expect(secOfDay(Date.parse("2026-10-02T02:59:59Z"))).toBe(86_399);
+
+    const at = (h: number, m: number) => atDaySec("2026-10-01", h * 3600 + m * 60);
+    const spans = [
+      { from: at(13, 0), to: at(13, 30) },
+      { from: at(13, 40), to: at(14, 30) },
+    ];
+    const now = at(15, 0);
+    // Trecho inteiro gravado.
+    expect(checkRange(spans, at(13, 5), at(13, 10), now)).toEqual({
+      error: null,
+      end: at(13, 10),
+      clamped: false,
+      missing: [],
+    });
+    // Atravessa a lacuna 13:30–13:40: avisa, mas deixa baixar.
+    const g = checkRange(spans, at(13, 20), at(13, 50), now);
+    expect(g.error).toBeNull();
+    expect(g.missing).toEqual([{ from: at(13, 30), to: at(13, 40) }]);
+    // Fim antes do início, mais de 60 min, nada gravado, início no futuro.
+    expect(checkRange(spans, at(13, 10), at(13, 5), now).error).toMatch(/depois do início/);
+    expect(checkRange(spans, at(13, 0), at(14, 1), now).error).toMatch(/máximo 60 minutos/);
+    expect(checkRange(spans, at(13, 31), at(13, 39), now).error).toBe(
+      `Não há gravação entre ${clock(at(13, 31))} e ${clock(at(13, 39))}.`,
+    );
+    expect(checkRange(spans, at(15, 1), at(15, 5), now).error).toMatch(/ainda não foi gravado/);
+    // Fim no futuro: corta para agora (−5 s) e mostra o que falta gravado.
+    const f = checkRange(spans, at(14, 20), at(15, 10), now);
+    expect(f.error).toBeNull();
+    expect(f.clamped).toBe(true);
+    expect(f.end).toBe(now - 5000);
+    expect(f.missing).toEqual([{ from: at(14, 30), to: now - 5000 }]);
+    // Os últimos minutos ainda não fechados não contam como "sem gravação".
+    const live = [{ from: at(14, 0), to: now - 90_000 }];
+    expect(checkRange(live, at(14, 50), at(15, 0), now).missing).toEqual([]);
+  });
+
+});
+
+describe("ao vivo por WebRTC", () => {
+  it("página WHEP: endereço escapado, som inicial e mensagens", async () => {
+    const { whepPage, parseWhepMsg, WEBRTC_AUDIO } = await import("../src/lib/whep-page");
+    const url = 'https://x/live/tok/whep?t=a"b</script>';
+    const html = whepPage(url, true);
+    // O endereço não consegue fechar o <script> da página.
+    expect(html).toContain('"https://x/live/tok/whep?t=a\\"b\\u003c/script>"');
+    expect(html.match(/<\/script>/g)).toHaveLength(1);
+    expect(html).toContain("playsinline autoplay muted");
+    expect(whepPage(url, false)).not.toContain("autoplay muted");
+    expect(parseWhepMsg('{"t":"state","s":"playing"}')).toEqual({ t: "state", s: "playing" });
+    expect(parseWhepMsg('{"t":"latency","v":0.8}')).toEqual({ t: "latency", v: 0.8 });
+    expect(parseWhepMsg("lixo")).toBeNull();
+    expect(parseWhepMsg('{"t":"outro"}')).toBeNull();
+    // AAC (padrão das câmeras) não vai pelo WebRTC: ligar o som troca para HLS.
+    expect(WEBRTC_AUDIO.has("aac")).toBe(false);
+    expect(WEBRTC_AUDIO.has("pcm_alaw")).toBe(true);
+  });
+});
+
+describe("notificação de alarme", () => {
+  it("toque abre a gravação no horário (quem pode reproduzir) ou o ao vivo", async () => {
+    const { routeForNotification } = await import("../src/lib/push-route");
+    const base = { type: "motion", cameraId: "c1", cameraName: "Portão", t: 1790000000000 };
+    expect(routeForNotification({ ...base, playback: true })).toEqual({
+      pathname: "/gravacoes/[id]",
+      params: { id: "c1", name: "Portão", t: "1790000000000" },
+    });
+    expect(routeForNotification({ ...base, playback: false })).toEqual({
+      pathname: "/camera/[id]",
+      params: { id: "c1", name: "Portão" },
+    });
+    expect(routeForNotification({ type: "test" })).toBeNull();
+    expect(routeForNotification(undefined)).toBeNull();
+  });
 });

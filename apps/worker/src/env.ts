@@ -41,6 +41,11 @@ const schema = z.object({
   API_READY_URL: z.string().default("http://api:3000/ready"),
   /** Endereço do painel usado nos e-mails de alerta (ex.: http://video.exemplo.com.br). */
   PANEL_URL: z.string().default(""),
+  /** Serviço de push da Expo (vazio = padrão exp.host). Testes usam um servidor falso. */
+  EXPO_PUSH_URL: z.string().default(""),
+  /** Token de acesso da conta Expo, se a "segurança de push" estiver ligada (opcional). */
+  EXPO_ACCESS_TOKEN: z.string().default(""),
+  PUSH_RECEIPTS_INTERVAL_S: z.coerce.number().positive().default(300),
   /** Prometheus interno (Fase 7): saúde e tráfego de rede da VM. Vazio = não consulta. */
   PROMETHEUS_URL: z.string().default("http://prometheus:9090"),
   CAMERA_ALERTS_INTERVAL_S: z.coerce.number().positive().default(10),

@@ -176,7 +176,7 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
 | **6. Armazenamento e proteção de disco** 🟡 | Quota de vídeo, alertas 70/85/95%, limpeza de emergência do mais antigo (decisão do cliente) e parada controlada como proteção final, disco lento, buracos na gravação, telas Armazenamento e Servidores | Encher o volume de teste até 95%: limpeza com evento, alerta e auditoria; sem nada apagável, gravação para, banco e sistema seguem funcionando; retomada automática ao liberar espaço. **Entregue: 11/11 na VM + E2E** |
 | **7. Monitoramento, dashboard, eventos e relatórios** 🟡 | Prometheus, dashboard (tela 1), Eventos e Alertas, Servidores, Relatórios, alertas por e-mail (SMTP/Gmail em Configurações → Integrações) | Cartões e gráficos com dados reais; queda de câmera gera alerta em ≤ 60 s; métricas de 7 dias disponíveis. **Entregue: aceite 9/9 na VM (testes 150/150 em nova execução, depois de travada de disco)** |
 | **8. Segurança, backup e resiliência** | HTTPS/RTMPS, rate limit, rotação de segredos, backup externo, restauração, testes de reinício | Restauração em VM limpa validada; reinício de contêiner e da VM sem perda de índice; teste de falta de espaço; **teste contínuo de 7 dias** |
-| **9. App mobile** 🟡 | Expo: login, grupos, ao vivo, reprodução da CAM-001, eventos, conta; preparado para white label. Etapas 9.1 base Android → 9.2 gravações → 9.3 push/eventos → 9.4 publicação (ver `fase-9-diagnostico-app.md`) | Build Android/iOS de teste; mesmas permissões da API; câmeras de outro cliente inacessíveis. **9.1 entregue e ao vivo validado no celular (01/10/2026). 9.2 entregue (01/10/2026): gravações, mosaico 1/4/9, alarmes, meus vídeos, foto das câmeras; APK 0.2.0, testes 267/267; parte do servidor aplicada depois de 08/10** |
+| **9. App mobile** 🟡 | Expo: login, grupos, ao vivo, reprodução da CAM-001, eventos, conta; preparado para white label. Etapas 9.1 base Android → 9.2 gravações → 9.3 push/eventos → 9.4 publicação (ver `fase-9-diagnostico-app.md`) | Build Android/iOS de teste; mesmas permissões da API; câmeras de outro cliente inacessíveis. **9.1 entregue e ao vivo validado no celular (01/10/2026). 9.2 entregue (01/10/2026): gravações, mosaico 1/4/9, alarmes, meus vídeos, foto das câmeras; APK 0.2.0, testes 267/267; parte do servidor aplicada depois de 08/10. 0.2.1–0.2.3: ajustes do teste no celular, Baixar trecho por horário, ao vivo por WebRTC. 9.3 (push) pronta no laboratório (02/10/2026), aguardando o projeto Expo e o Firebase. iPhone só depois do APK Android definitivo, sem mais mudanças (decisão de 02/10/2026)** |
 | **10. Aceite do piloto + runbook de migração** | Checklist da seção 7 da especificação, relatório de capacidade medida, roteiro de migração para o servidor dedicado | Todos os critérios de aceite do piloto verificados e documentados |
 
 ---
@@ -212,6 +212,27 @@ Cada fase termina com: código, migrations (se houver), testes automáticos, scr
    - administrador do cliente ajustar o alarme e os horários (hoje só a equipe da plataforma);
    - cerca/linha virtual como tipo próprio na linha do tempo (conferir antes se o firmware da VIP 1230 FC+ tem; a ficha técnica não lista);
    - acionar a sirene da câmera pelo app (Mibo): depende de a câmera aceitar comando por protocolo aberto (ONVIF) e de um caminho até ela (agente no local ou VPN). A nuvem da Mibo não tem interface aberta.
+8. **Gravar ou não o áudio, por câmera** (pedido em 02/10/2026, para depois):
+   - opção no cadastro da câmera, ao lado de Gravação e Retenção;
+   - hoje a gravação guarda o que a câmera envia, com áudio quando ela manda;
+   - a forma de tirar o áudio só da gravação (sem mexer no ao vivo nem exigir configurar a câmera) será analisada antes de implementar.
+9. **Marca do provedor no app e no painel** (aprovada para a lista em 02/10/2026; momento a confirmar, sugestão antes da publicação 9.4):
+   - novo nível acima do cliente: cadastro de **Marcas/Provedores** (nome, logo, cor, suporte: WhatsApp, telefone, e-mail, site). A TopCam/SuporTI é a marca padrão;
+   - cada cliente é ligado a uma marca (sem marca = TopCam);
+   - no app, depois do login: logo e nome do provedor no topo, cor do provedor e "Falar com o suporte" do provedor. Fica guardado no celular para as próximas aberturas. O ícone e o nome na tela do celular continuam TopCam (vêm da loja);
+   - no painel web, opcional: o mesmo para os usuários dos clientes;
+   - é o modelo aceito pela Apple (um app único com os clientes por dentro, regra 4.2.6). Apps próprios por provedor ficam para quem tiver a própria conta nas lojas;
+   - passo seguinte, a decidir junto com o SGP: acesso do provedor ao painel para cuidar só dos clientes dele.
+10. **Análise por IA local: leitura de placa e reconhecimento facial** (pedido em 10/10/2026; momento a definir):
+   - roda no próprio servidor, sem enviar imagens para serviços externos. Usa modelos abertos;
+   - aproveita a detecção de movimento: analisa só alguns quadros de cada movimento, não o vídeo inteiro;
+   - um serviço novo ("visão") gera eventos como "Placa ABC1D23 · Portão · 14:32" e "Pessoa cadastrada: Maria · Portaria";
+   - os eventos aparecem na linha do tempo, permitem busca por placa e geram alarmes (placa desconhecida, placa específica, pessoa cadastrada ou não);
+   - **etapa 1: leitura de placa** (inclui o padrão Mercosul). Teste com uma câmera posicionada para isso (placa com pelo menos ~100 px de largura, ângulo baixo, infravermelho);
+   - **etapa 2: reconhecimento facial.** Cadastro das pessoas com consentimento registrado, opção ligada por cliente e por câmera, tempo de guarda curto;
+   - **em paralelo:** avaliar câmeras com análise interna (placa ou rosto), recebendo o resultado como evento, do mesmo jeito que o movimento da VIP 1230 por e-mail;
+   - **LGPD:** placa é dado pessoal; **biometria facial é dado pessoal sensível** (art. 11). Antes da etapa 2: base legal (em geral consentimento), aviso no local, segurança reforçada e política de retenção. Vale revisão jurídica;
+   - **infraestrutura:** a VM 107 é pequena. A leitura de placa de poucas câmeras talvez rode nela; o reconhecimento facial em escala pede mais processador ou uma GPU, o que combina com o servidor dedicado.
 
 ## 7. Fase 1 — Fundação e ingestão RTMP autenticada (detalhe)
 

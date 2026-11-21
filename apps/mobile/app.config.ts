@@ -1,5 +1,5 @@
 import type { ExpoConfig } from "expo/config";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -10,6 +10,10 @@ import { join } from "node:path";
  *
  * Para um provedor novo: crie brands/<marca>/brand.json (+ logo.png), rode
  * `python3 scripts/brand-assets.py <marca>` e gere o app com BRAND=<marca>.
+ *
+ * Notificações push (alarmes): cada marca tem o seu projeto na Expo (easProjectId no
+ * brand.json) e, no Android, o seu brands/<marca>/google-services.json (Firebase). Sem
+ * eles o app funciona normalmente, só não recebe push.
  */
 
 export interface Brand {
@@ -22,6 +26,8 @@ export interface Brand {
   darkColor: string;
   tagline: string;
   supportEmail: string;
+  /** Projeto da marca na Expo (push). Vazio = sem push. */
+  easProjectId?: string;
 }
 
 const brandId = process.env.BRAND || "topcam";
@@ -32,7 +38,8 @@ const asset = (f: string) => `./brands/${brandId}/generated/${f}`;
 const version = (
   JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { version: string }
 ).version;
-const buildNumber = 2;
+const buildNumber = 7;
+const googleServices = join(dir, "google-services.json");
 
 const config: ExpoConfig = {
   name: brand.name,
@@ -57,6 +64,9 @@ const config: ExpoConfig = {
       monochromeImage: asset("adaptive-monochrome.png"),
     },
     predictiveBackGestureEnabled: false,
+    ...(existsSync(googleServices)
+      ? { googleServicesFile: `./brands/${brandId}/google-services.json` }
+      : {}),
   },
   web: { favicon: asset("favicon.png"), output: "single" },
   plugins: [
@@ -72,6 +82,14 @@ const config: ExpoConfig = {
     ],
     "expo-secure-store",
     [
+      "expo-notifications",
+      {
+        icon: asset("adaptive-monochrome.png"),
+        color: brand.primaryColor,
+        defaultChannel: "alarmes",
+      },
+    ],
+    [
       "expo-media-library",
       {
         savePhotosPermission: "Permitir salvar os vídeos baixados das câmeras na galeria.",
@@ -85,7 +103,11 @@ const config: ExpoConfig = {
       { android: { usesCleartextTraffic: apiUrl.startsWith("http://") } },
     ],
   ],
-  extra: { brandId, brand: { ...brand, apiUrl } },
+  extra: {
+    brandId,
+    brand: { ...brand, apiUrl },
+    ...(brand.easProjectId ? { eas: { projectId: brand.easProjectId } } : {}),
+  },
 };
 
 export default config;

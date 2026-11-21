@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "857720308030",
+    "project_id": "topcam-e00c2",
+    "storage_bucket": "topcam-e00c2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:857720308030:android:5c835df4f68c0e3e90ac6f",
+        "android_client_info": {
+          "package_name": "br.com.suportinet.topcam"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDvc5WZIladFOtjSyHei3lCGbGUa9DQeeI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

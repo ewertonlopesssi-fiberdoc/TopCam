@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -16,17 +17,30 @@ import {
 } from "react-native";
 import * as MediaLibrary from "expo-media-library/legacy";
 import { MonthCalendar } from "../../components/month-calendar";
+import { TimeField } from "../../components/time-field";
 import { Timeline, type Mark } from "../../components/timeline";
 import { Button, Center, ErrorText } from "../../components/ui";
 import { ApiError } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { colors } from "../../lib/theme";
-import { addDays, chunkFrom, clock, dayOf, dayStart, toSpans, type Span } from "../../lib/time";
+import {
+  addDays,
+  atDaySec,
+  checkRange,
+  chunkFrom,
+  clock,
+  dayOf,
+  dayStart,
+  secOfDay,
+  toSpans,
+  type Span,
+} from "../../lib/time";
 import { downloadVideo, videosSupported } from "../../lib/videos";
 
 /**
  * Gravações de uma câmera: calendário, linha do tempo (arrastar para ir ao horário), player com
- * voltar/avançar, velocidade até 16x e baixar um trecho para "Meus vídeos".
+ * voltar/avançar, velocidade até 16x e baixar um trecho (dia + das/às, ou marcado na linha do
+ * tempo) para "Meus vídeos".
  * A reprodução usa o mesmo servidor do painel (MP4 contínuo a partir do horário pedido).
  */
 
@@ -48,7 +62,10 @@ interface Grant {
 }
 
 const RATES = [1, 2, 4, 8, 16];
-const DURATIONS = [1, 5, 10, 30, 60];
+const DEFAULT_DL_MS = 5 * 60_000;
+const MAX_DL_MS = 3600_000;
+/** Último segundo do dia (Brasília) do instante. */
+const dayEnd = (ms: number) => dayStart(addDays(dayOf(ms), 1)) - 1000;
 
 function setRate(p: VideoPlayer, r: number) {
   p.playbackRate = r;
@@ -75,17 +92,14 @@ export default function Gravacoes() {
   const [muted, setMuted] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [showCal, setShowCal] = useState(false);
+  // Trecho para baixar: início e fim (ms). Vêm do cursor, das marcações ou dos campos Das/Às.
   const [dl, setDl] = useState<{
     open: boolean;
-    minutes: number;
+    start: number | null;
+    end: number | null;
     busy: boolean;
     error: string | null;
-  }>({
-    open: false,
-    minutes: 5,
-    busy: false,
-    error: null,
-  });
+  }>({ open: false, start: null, end: null, busy: false, error: null });
   const chunk = useRef<{ start: number; end: number } | null>(null);
   const grant = useRef<Grant | null>(null);
   const pending = useRef<number | null>(t ? Number(t) - 10_000 : null);
@@ -238,23 +252,95 @@ export default function Gravacoes() {
     else player.play();
   }
 
-  async function download() {
+  function pickDay(d: string) {
+    setDay(d);
+    setMonth(d.slice(0, 7));
+    chunk.current = null;
+    setCursor(null);
+    player.pause();
+  }
+
+  const sec = (ms: number) => Math.floor(ms / 1000) * 1000;
+
+  function markStart() {
     if (cursor === null) return;
+    const start = sec(cursor);
+    setDl((d) => ({
+      ...d,
+      start,
+      end:
+        d.end !== null && d.end > start && d.end - start <= MAX_DL_MS
+          ? d.end
+          : Math.min(start + DEFAULT_DL_MS, dayEnd(start)),
+      error: null,
+    }));
+  }
+  function markEnd() {
+    if (cursor === null) return;
+    const end = sec(cursor);
+    setDl((d) => ({
+      ...d,
+      end,
+      start:
+        d.start !== null && d.start < end && end - d.start <= MAX_DL_MS
+          ? d.start
+          : Math.max(end - DEFAULT_DL_MS, dayStart(dayOf(end))),
+      error: null,
+    }));
+  }
+  function openDownload() {
+    setDl((d) => {
+      if (d.start !== null && d.end !== null) return { ...d, open: true, error: null };
+      const base = cursor ?? spans.at(-1)?.from ?? dayStart(day);
+      const start = sec(base);
+      return {
+        ...d,
+        open: true,
+        start,
+        end: Math.min(start + DEFAULT_DL_MS, dayEnd(start)),
+        error: null,
+      };
+    });
+  }
+  /** Troca o dia dentro do "Baixar trecho": mantém os horários e abre o dia na linha do tempo. */
+  function dlDay(d: string) {
+    setDl((x) =>
+      x.start === null || x.end === null
+        ? x
+        : {
+            ...x,
+            start: atDaySec(d, secOfDay(x.start)),
+            end: atDaySec(d, secOfDay(x.end)),
+          },
+    );
+    pickDay(d);
+  }
+
+  async function download() {
+    if (dl.start === null || dl.end === null) return;
+    const check = checkRange(spans, dl.start, dl.end);
+    if (check.error) return setDl((d) => ({ ...d, error: check.error }));
     setDl((d) => ({ ...d, busy: true, error: null }));
     try {
-      const start = Math.floor(cursor / 1000) * 1000;
-      const end = Math.min(start + dl.minutes * 60_000, Date.now() - 5000);
+      const start = dl.start;
+      const end = check.end;
       const r = await api.post<{ downloadUrl: string; filename: string; seconds: number }>(
         `/api/v1/cameras/${id}/exports`,
         { start: new Date(start).toISOString(), end: new Date(end).toISOString() },
       );
+      if (!videosSupported) {
+        // Navegador (testes): o próprio navegador baixa o MP4; "Meus vídeos" é só no celular.
+        setDl({ open: false, start: null, end: null, busy: false, error: null });
+        await Linking.openURL(api.url(r.downloadUrl));
+        return;
+      }
       const saved = await downloadVideo(
         api.url(r.downloadUrl),
         {},
         { cameraId: id, cameraName: summary?.name ?? name ?? "", start, seconds: r.seconds },
         r.filename,
       );
-      setDl({ open: false, minutes: dl.minutes, busy: false, error: null });
+      setDl({ open: false, start: null, end: null, busy: false, error: null });
       Alert.alert("Vídeo baixado", `${r.filename}\nEstá em "Meus vídeos".`, [
         { text: "OK" },
         {
@@ -407,11 +493,8 @@ export default function Gravacoes() {
             selected={day}
             onMonth={setMonth}
             onSelect={(d) => {
-              setDay(d);
               setShowCal(false);
-              chunk.current = null;
-              setCursor(null);
-              player.pause();
+              pickDay(d);
             }}
           />
         )}
@@ -427,19 +510,43 @@ export default function Gravacoes() {
         ) : (
           <ActivityIndicator />
         )}
-        {summary.canExport && videosSupported && (
-          <Button
-            label="Baixar trecho"
-            icon="cloud-download"
-            variant="secondary"
-            disabled={cursor === null}
-            onPress={() => setDl((d) => ({ ...d, open: true, error: null }))}
-          />
-        )}
-        {summary.canExport && !videosSupported && (
-          <Text style={{ color: colors.muted, fontSize: 12 }}>
-            Baixar trechos funciona no app do celular.
-          </Text>
+        {summary.canExport && (
+          <View style={{ gap: 8 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Pressable
+                style={[st.mark, cursor === null && { opacity: 0.4 }]}
+                disabled={cursor === null}
+                onPress={markStart}
+                accessibilityRole="button"
+                accessibilityLabel="Marcar início aqui"
+              >
+                <Ionicons name="flag-outline" size={16} color={colors.primary} />
+                <Text style={st.markText}>Marcar início aqui</Text>
+              </Pressable>
+              <Pressable
+                style={[st.mark, cursor === null && { opacity: 0.4 }]}
+                disabled={cursor === null}
+                onPress={markEnd}
+                accessibilityRole="button"
+                accessibilityLabel="Marcar fim aqui"
+              >
+                <Ionicons name="flag" size={16} color={colors.primary} />
+                <Text style={st.markText}>Marcar fim aqui</Text>
+              </Pressable>
+            </View>
+            {dl.start !== null && dl.end !== null && (
+              <Text style={{ color: colors.ink, textAlign: "center" }} testID="dl-marked">
+                Trecho: das {clock(dl.start)} às {clock(dl.end)}
+              </Text>
+            )}
+            <Button
+              label="Baixar trecho"
+              icon="cloud-download"
+              variant="secondary"
+              disabled={!spans.length}
+              onPress={openDownload}
+            />
+          </View>
         )}
       </View>
 
@@ -451,41 +558,47 @@ export default function Gravacoes() {
       >
         <View style={st.modalBg}>
           <View style={st.modal}>
-            <Text style={st.modalTitle}>Baixar trecho</Text>
-            <Text style={{ color: colors.muted }}>
-              A partir de {cursor !== null ? clock(cursor) : "--"} ({day.slice(8, 10)}/
-              {day.slice(5, 7)}), duração:
-            </Text>
-            <View style={st.row}>
-              {DURATIONS.map((m) => (
-                <Pressable
-                  key={m}
-                  onPress={() => setDl((d) => ({ ...d, minutes: m }))}
-                  style={[st.rate, dl.minutes === m && st.rateOn]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: dl.minutes === m }}
-                >
-                  <Text style={[st.rateText, dl.minutes === m && { color: "#fff" }]}>{m} min</Text>
-                </Pressable>
-              ))}
-            </View>
-            {cursor !== null && (
-              <Text style={{ color: colors.ink }}>
-                Das {clock(cursor)} às {clock(Math.min(cursor + dl.minutes * 60_000, Date.now()))}
-              </Text>
-            )}
-            <ErrorText>{dl.error}</ErrorText>
-            <Button
-              label="Baixar"
-              icon="cloud-download"
-              busy={dl.busy}
-              onPress={() => void download()}
-            />
-            <Button
-              label="Cancelar"
-              variant="secondary"
-              onPress={() => setDl((d) => ({ ...d, open: false }))}
-            />
+            <ScrollView contentContainerStyle={{ gap: 10 }} keyboardShouldPersistTaps="handled">
+              <Text style={st.modalTitle}>Baixar trecho</Text>
+              {dl.start !== null && dl.end !== null && (
+                <>
+                  <MonthCalendar
+                    month={month}
+                    days={days}
+                    selected={day}
+                    onMonth={setMonth}
+                    onSelect={dlDay}
+                  />
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <TimeField
+                      label="Das"
+                      value={secOfDay(dl.start)}
+                      onChange={(v) =>
+                        setDl((d) => ({ ...d, start: atDaySec(day, v), error: null }))
+                      }
+                    />
+                    <TimeField
+                      label="Às"
+                      value={secOfDay(dl.end)}
+                      onChange={(v) => setDl((d) => ({ ...d, end: atDaySec(day, v), error: null }))}
+                    />
+                  </View>
+                  <RangeInfo spans={spans} start={dl.start} end={dl.end} />
+                </>
+              )}
+              <ErrorText>{dl.error}</ErrorText>
+              <Button
+                label="Baixar"
+                icon="cloud-download"
+                busy={dl.busy}
+                onPress={() => void download()}
+              />
+              <Button
+                label="Cancelar"
+                variant="secondary"
+                onPress={() => setDl((d) => ({ ...d, open: false }))}
+              />
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -496,6 +609,42 @@ export default function Gravacoes() {
         <Text style={{ color: colors.primary, fontWeight: "600" }}>Ver meus vídeos</Text>
       </Pressable>
     </ScrollView>
+  );
+}
+
+/** Resumo do trecho escolhido: duração, avisos e o que impede de baixar. */
+function RangeInfo({ spans, start, end }: { spans: Span[]; start: number; end: number }) {
+  const c = checkRange(spans, start, end);
+  if (c.error)
+    return (
+      <Text style={{ color: colors.danger }} testID="dl-check">
+        {c.error}
+      </Text>
+    );
+  const s = Math.round((c.end - start) / 1000);
+  const len = s >= 60 ? `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ""}` : `${s} s`;
+  return (
+    <View style={{ gap: 4 }} testID="dl-check">
+      <Text style={{ color: colors.ink, fontWeight: "600" }}>
+        {clock(start)} às {clock(c.end)} · {len}
+      </Text>
+      {c.clamped && (
+        <Text style={{ color: colors.muted, fontSize: 12 }}>
+          O fim foi ajustado para o último horário já gravado.
+        </Text>
+      )}
+      {c.missing.length > 0 && (
+        <Text style={{ color: "#b45309", fontSize: 12 }}>
+          Sem gravação{" "}
+          {c.missing
+            .slice(0, 3)
+            .map((m) => `das ${clock(m.from)} às ${clock(m.to)}`)
+            .join(", ")}
+          {c.missing.length > 3 ? ` e mais ${c.missing.length - 3}` : ""}. O vídeo pula esse
+          intervalo.
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -588,7 +737,20 @@ const st = StyleSheet.create({
     padding: 12,
   },
   dayText: { flex: 1, fontSize: 16, fontWeight: "600", color: colors.ink },
-  modalBg: { flex: 1, backgroundColor: "#00000088", justifyContent: "center", padding: 20 },
-  modal: { backgroundColor: "#fff", borderRadius: 16, padding: 20, gap: 12 },
+  modalBg: { flex: 1, backgroundColor: "#00000088", justifyContent: "center", padding: 16 },
+  modal: { backgroundColor: "#fff", borderRadius: 16, padding: 16, maxHeight: "95%" },
+  mark: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    paddingVertical: 10,
+    backgroundColor: "#fff",
+  },
+  markText: { color: colors.primary, fontWeight: "600" },
   modalTitle: { fontSize: 18, fontWeight: "700", color: colors.ink },
 });

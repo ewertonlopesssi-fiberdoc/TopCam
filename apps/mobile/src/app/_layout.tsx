@@ -2,7 +2,11 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider } from "../lib/auth";
+import { setupForegroundHandler } from "../lib/push";
 import { colors } from "../lib/theme";
+
+// Alarme com o app aberto: mostra o aviso no alto da tela, com som.
+setupForegroundHandler();
 
 export default function RootLayout() {
   return (

@@ -30,7 +30,8 @@ import { createTestDb, ownerQuery, type TestDb } from "../../../packages/db/test
 import type { WorkerContext } from "../src/context.js";
 import { loadEnv } from "../src/env.js";
 import { createEventsSmtpServer } from "../src/events/smtp.js";
-import { processAlarms } from "../src/jobs/motion.js";
+import { checkPushReceipts, processAlarms } from "../src/jobs/motion.js";
+import type { PushMessage, PushTicket } from "@topcam/shared";
 import { applyRetention } from "../src/jobs/recordings.js";
 import { CameraDetector } from "../src/motion/detector.js";
 
@@ -408,6 +409,153 @@ describe("alarme", () => {
       db,
       `UPDATE system_settings SET value = value || '{"host": "127.0.0.1"}'::jsonb WHERE key = 'integrations.smtp'`,
     );
+  });
+  describe("push no app", () => {
+    const pushed: PushMessage[] = [];
+    let ticketFor: (m: PushMessage) => PushTicket = () => ({ status: "ok", id: "t" });
+    const push = async (msgs: PushMessage[]) => {
+      pushed.push(...msgs);
+      return msgs.map((m) => ticketFor(m));
+    };
+    const dev: Record<string, string> = {};
+    const uid = async (email: string) =>
+      (await ownerQuery<{ id: string }>(db, "SELECT id FROM users WHERE email = $1", [email]))[0]!
+        .id;
+    const session = async (user: string, revoked = false) =>
+      (
+        await ownerQuery<{ id: string }>(
+          db,
+          `INSERT INTO sessions (user_id, tenant_id, refresh_token_hash, client, expires_at, revoked_at)
+           VALUES ($1, $2, $3, 'mobile', now() + interval '30 days', $4) RETURNING id`,
+          [user, tenant, randomBytes(16).toString("hex"), revoked ? new Date() : null],
+        )
+      )[0]!.id;
+    const device = async (name: string, user: string, sess: string, enabled = true) => {
+      const token = `ExponentPushToken[${name}-${randomBytes(6).toString("hex")}]`;
+      dev[name] = (
+        await ownerQuery<{ id: string }>(
+          db,
+          `INSERT INTO push_devices (user_id, tenant_id, session_id, token, platform, enabled)
+           VALUES ($1, $2, $3, $4, 'android', $5) RETURNING id`,
+          [user, tenant, sess, token, enabled],
+        )
+      )[0]!.id;
+      return token;
+    };
+    const tok: Record<string, string> = {};
+
+    beforeAll(async () => {
+      const gestor = await uid("gestor@alfa.test");
+      const porteiro = await uid("porteiro@alfa.test");
+      const outro = await uid("outro@alfa.test");
+      tok.gestor = await device("gestor", gestor, await session(gestor));
+      tok.porteiro = await device("porteiro", porteiro, await session(porteiro));
+      tok.saiu = await device("saiu", porteiro, await session(porteiro, true));
+      tok.desligado = await device("desligado", gestor, await session(gestor), false);
+      tok.outro = await device("outro", outro, await session(outro));
+    });
+    beforeEach(() => {
+      pushed.length = 0;
+      ticketFor = (m) => ({ status: "ok", id: `ticket-${m.to}` });
+    });
+
+    it("só push (e-mail desligado na câmera): celulares logados de quem tem acesso", async () => {
+      await ownerQuery(db, "UPDATE cameras SET alarm_email = false WHERE id = $1", [cam1]);
+      const at = new Date();
+      await hit(at);
+      const r = await processAlarms(ctx, { send, push });
+      expect(r).toMatchObject({ notified: 1, emails: 0, pushes: 2, failed: 0 });
+      expect(sent.length).toBe(0);
+      // Não recebem: sessão encerrada (saiu do app), notificações desligadas, sem acesso.
+      expect(pushed.map((m) => m.to).sort()).toEqual([tok.gestor, tok.porteiro].sort());
+      const g = pushed.find((m) => m.to === tok.gestor)!;
+      expect(g).toMatchObject({
+        title: "Movimento detectado: Entrada Principal",
+        channelId: "alarmes",
+        priority: "high",
+        data: { type: "motion", cameraId: cam1, t: at.getTime(), playback: true },
+      });
+      expect(g.body).toMatch(/^Matriz · /);
+      // Porteiro vê ao vivo mas não pode reproduzir: o toque abre o ao vivo.
+      expect(pushed.find((m) => m.to === tok.porteiro)!.data).toMatchObject({ playback: false });
+      expect(await statuses()).toEqual(["sent"]);
+      const n = await ownerQuery<{ channel: string; push_ticket: string }>(
+        db,
+        "SELECT channel, push_ticket FROM alarm_notifications ORDER BY push_ticket",
+      );
+      expect(n.map((x) => x.channel)).toEqual(["push", "push"]);
+      expect(n.every((x) => x.push_ticket.startsWith("ticket-"))).toBe(true);
+    });
+
+    it("e-mail e push juntos; celular sem o app tem o token desligado na hora", async () => {
+      ticketFor = (m) =>
+        m.to === tok.porteiro
+          ? { status: "error", error: "DeviceNotRegistered", message: "not registered" }
+          : { status: "ok", id: `ticket-${m.to}` };
+      await hit(new Date());
+      const r = await processAlarms(ctx, { send, push });
+      expect(r).toMatchObject({ emails: 2, pushes: 1, failed: 1 });
+      expect(await statuses()).toEqual(["sent"]);
+      const d = await ownerQuery<{ enabled: boolean; disabled_reason: string }>(
+        db,
+        "SELECT enabled, disabled_reason FROM push_devices WHERE id = $1",
+        [dev.porteiro],
+      );
+      expect(d[0]).toEqual({ enabled: false, disabled_reason: "DeviceNotRegistered" });
+      await ownerQuery(
+        db,
+        "UPDATE push_devices SET enabled = true, disabled_reason = NULL WHERE id = $1",
+        [dev.porteiro],
+      );
+    });
+
+    it("recibos: recusado vira falha; DeviceNotRegistered desliga o token", async () => {
+      await ownerQuery(db, "UPDATE cameras SET alarm_email = false WHERE id = $1", [cam1]);
+      await hit(new Date());
+      await processAlarms(ctx, { send, push });
+      // Recibo só é pedido 15 min depois do envio.
+      const early = await checkPushReceipts(ctx, {
+        receipts: async () => {
+          throw new Error("não deveria pedir");
+        },
+      });
+      expect(early.checked).toBe(0);
+      await ownerQuery(
+        db,
+        "UPDATE alarm_notifications SET created_at = now() - interval '20 minutes'",
+      );
+      const asked: string[] = [];
+      const r = await checkPushReceipts(ctx, {
+        receipts: async (ids) => {
+          asked.push(...ids);
+          return {
+            [`ticket-${tok.gestor}`]: { status: "ok" },
+            [`ticket-${tok.porteiro}`]: {
+              status: "error",
+              error: "DeviceNotRegistered",
+              message: "uninstalled",
+            },
+          };
+        },
+      });
+      expect(asked.length).toBe(2);
+      expect(r).toEqual({ checked: 2, failed: 1, disabled: 1 });
+      const rows = await ownerQuery<{ status: string; error: string | null }>(
+        db,
+        "SELECT status, error FROM alarm_notifications ORDER BY status DESC",
+      );
+      expect(rows.map((x) => x.status)).toEqual(["sent", "failed"]);
+      expect(rows[1]!.error).toMatch(/DeviceNotRegistered/);
+      const d = await ownerQuery<{ enabled: boolean }>(
+        db,
+        "SELECT enabled FROM push_devices WHERE id = $1",
+        [dev.porteiro],
+      );
+      expect(d[0]!.enabled).toBe(false);
+      // Já conferidos: não pede de novo.
+      const again = await checkPushReceipts(ctx, { receipts: async () => ({}) });
+      expect(again.checked).toBe(0);
+    });
   });
 });
 

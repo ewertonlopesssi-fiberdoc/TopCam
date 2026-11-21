@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ApiClient, type User } from "./api";
 import { brand } from "./brand";
+import { unregisterPush } from "./push";
 import { keyStore } from "./store";
 
 interface AuthState {
@@ -33,6 +34,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return u;
   }, []);
   const logout = useCallback(async () => {
+    // Este celular deixa de receber os alarmes desta conta.
+    await unregisterPush(api);
     await api.logout();
     setUser(null);
   }, []);

@@ -1,35 +1,45 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Stack, router, useIsFocused, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../lib/auth";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import { LivePlayer } from "../../components/live-player";
+import { LivePlayer, type LiveTech } from "../../components/live-player";
 import { colors } from "../../lib/theme";
 
 /** Ao vivo de uma câmera. Deitar o celular ou o botão de tela cheia amplia o vídeo. */
 export default function CameraLive() {
-  const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
+  const { id, name, rec } = useLocalSearchParams<{ id: string; name?: string; rec?: string }>();
   const [muted, setMuted] = useState(true);
+  const [tech, setTech] = useState<{ tech: LiveTech; latency: number | null } | null>(null);
+  const onTech = useCallback(
+    (t: LiveTech, latency: number | null) => setTech({ tech: t, latency }),
+    [],
+  );
   const full = useRef<(() => void) | null>(null);
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
   // Com as gravações abertas por cima, o ao vivo para.
   const focused = useIsFocused();
   const { api } = useAuth();
-  // Botão "Gravações" só se o usuário pode reproduzir esta câmera e ela grava.
-  const [canPlay, setCanPlay] = useState(false);
+  // Botão "Gravações": aparece já se a câmera grava (vem da lista) e some só se a API
+  // disser que o usuário não pode reproduzir (404). Erro de rede não esconde o botão.
+  const [canPlay, setCanPlay] = useState(rec === "1");
   useEffect(() => {
     api
-      .get<{ segments: number }>(`/api/v1/cameras/${id}/recordings/summary`)
-      .then((s) => setCanPlay(s.segments > 0))
-      .catch(() => setCanPlay(false));
+      .get<{ recordingEnabled: boolean; segments: number }>(
+        `/api/v1/cameras/${id}/recordings/summary`,
+      )
+      .then((s) => setCanPlay(s.recordingEnabled || s.segments > 0))
+      .catch((e) => {
+        if ((e as { status?: number }).status === 404) setCanPlay(false);
+      });
   }, [api, id]);
 
   return (
     <View style={{ flex: 1, backgroundColor: landscape ? "#000" : colors.bg }}>
       <Stack.Screen options={{ title: name ?? "Ao vivo", headerShown: !landscape }} />
       <View style={landscape ? { flex: 1 } : { width, height: (width * 9) / 16 }}>
-        {focused && <LivePlayer cameraId={id} muted={muted} fullscreenRef={full} />}
+        {focused && <LivePlayer cameraId={id} muted={muted} fullscreenRef={full} onTech={onTech} />}
       </View>
       {!landscape && (
         <View style={st.bar}>
@@ -69,8 +79,11 @@ export default function CameraLive() {
         </View>
       )}
       {!landscape && (
-        <Text style={st.hint}>
-          Ao vivo com 2 a 3 segundos de atraso. Deite o celular para ampliar.
+        <Text style={st.hint} testID="live-hint">
+          {tech?.tech === "webrtc"
+            ? `Tempo real${tech.latency !== null ? ` (atraso de ${tech.latency.toFixed(1).replace(".", ",")} s)` : ""}. Com o som ligado, o vídeo pode ficar alguns segundos atrás.`
+            : "Ao vivo com alguns segundos de atraso."}{" "}
+          Deite o celular para ampliar.
         </Text>
       )}
     </View>

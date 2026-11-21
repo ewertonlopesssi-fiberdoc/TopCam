@@ -135,10 +135,10 @@ test.describe("app mobile 9.2 (web)", () => {
     await expect
       .poll(() => dc("exec", "-T", "api", "sh", "-c", "ls /snapshots | wc -l"), { timeout: 60_000 })
       .not.toBe("0");
-    // Um alarme na CAM-001, dentro do trecho gravado.
+    // Um alarme na CAM-001, no meio do último segmento gravado (que pode ser curto).
     psql(
       `INSERT INTO motion_events (tenant_id, camera_id, source, kind, started_at, ended_at, alarm_status)
-       SELECT tenant_id, camera_id, 'camera', 'human', started_at + interval '20 seconds', started_at + interval '30 seconds', 'disabled'
+       SELECT tenant_id, camera_id, 'camera', 'human', started_at + (ended_at - started_at) / 2, started_at + (ended_at - started_at) * 3 / 4, 'disabled'
          FROM recording_segments WHERE camera_id = '${cams["CAM-001"]}' AND state = 'verified' ORDER BY started_at DESC LIMIT 1`,
     );
   });
@@ -230,6 +230,45 @@ test.describe("app mobile 9.2 (web)", () => {
     await page.getByRole("button", { name: "Escolher dia" }).click();
     await expect(page.getByRole("button", { name: /, com gravação/ }).first()).toBeVisible();
     await page.screenshot({ path: "reports/screens/app92-gravacoes.png", fullPage: true });
+
+    // Baixar trecho (0.2.2): marca o início na linha do tempo, confere Das/Às e baixa.
+    await page.getByRole("button", { name: "Marcar início aqui" }).click();
+    await expect(page.getByTestId("dl-marked")).toContainText("Trecho: das");
+    await page.getByRole("button", { name: "Baixar trecho" }).click();
+    await expect(page.getByLabel("Das hora", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Às minuto", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("dl-check")).not.toContainText("precisa");
+    await page.screenshot({ path: "reports/screens/app92-baixar-trecho.png" });
+    const exp = page.waitForResponse(
+      (r) => r.url().includes("/exports") && r.request().method() === "POST",
+    );
+    page.context().once("page", (p) => void p.close().catch(() => undefined));
+    await page.getByRole("button", { name: "Baixar", exact: true }).click();
+    const er = await exp;
+    expect(er.status()).toBe(200);
+    const body = (await er.json()) as { seconds: number; recordedSeconds: number };
+    expect(body.seconds).toBeGreaterThan(0);
+    expect(body.seconds).toBeLessThanOrEqual(300);
+    expect(body.recordedSeconds).toBeGreaterThan(0);
+    const sent = JSON.parse(er.request().postData() ?? "{}") as { start: string; end: string };
+    expect(Date.parse(sent.end)).toBeGreaterThan(Date.parse(sent.start));
+    // Fim antes do início: o app avisa e não pede ao servidor.
+    await page.getByRole("button", { name: "Baixar trecho" }).click();
+    await page.getByLabel("Às hora", { exact: true }).fill("00");
+    await page.getByLabel("Às hora", { exact: true }).press("Tab");
+    await expect(page.getByTestId("dl-check")).toContainText("O fim precisa ser depois do início");
+    await page.getByRole("button", { name: "Cancelar" }).click();
+
+    // Câmera que grava e com "pode reproduzir": botão na lista e no ao vivo.
+    await page.goto(APP);
+    await expect(page.getByRole("button", { name: "Gravações de Entrada Principal" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByRole("button", { name: "Gravações de Estacionamento" })).toHaveCount(0);
+    await page.getByRole("button", { name: /Entrada Principal, CAM-001/ }).click();
+    await expect(page.getByRole("button", { name: "Gravações" })).toBeVisible();
+    await page.getByRole("button", { name: "Gravações" }).click();
+    await expect(page.getByTestId("app-timeline")).toBeVisible({ timeout: 20_000 });
 
     // Câmera sem "pode reproduzir": o ao vivo não oferece Gravações.
     await page.goto(APP);

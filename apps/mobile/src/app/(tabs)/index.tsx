@@ -105,7 +105,10 @@ export default function Cameras() {
                     accessibilityRole="button"
                     accessibilityLabel={`${c.name}, ${c.code}`}
                     onPress={() =>
-                      router.push({ pathname: "/camera/[id]", params: { id: c.id, name: c.name } })
+                      router.push({
+                        pathname: "/camera/[id]",
+                        params: { id: c.id, name: c.name, rec: c.recordingEnabled ? "1" : "0" },
+                      })
                     }
                     style={({ pressed }) => [st.row, pressed && { opacity: 0.8 }]}
                   >
@@ -117,6 +120,22 @@ export default function Cameras() {
                       <Text style={st.code}>{c.code}</Text>
                       <StatusBadge status={c.status} />
                     </View>
+                    {c.recordingEnabled && (
+                      <Pressable
+                        style={st.recBtn}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Gravações de ${c.name}`}
+                        onPress={() =>
+                          router.push({
+                            pathname: "/gravacoes/[id]",
+                            params: { id: c.id, name: c.name },
+                          })
+                        }
+                      >
+                        <Ionicons name="film" size={20} color={colors.primary} />
+                        <Text style={st.recText}>Gravações</Text>
+                      </Pressable>
+                    )}
                   </Pressable>
                 ))}
               </View>
@@ -167,4 +186,6 @@ const st = StyleSheet.create({
   info: { flex: 1, paddingVertical: 10, paddingRight: 10, gap: 4, alignItems: "flex-start" },
   name: { fontSize: 16, fontWeight: "600", color: colors.ink },
   code: { fontSize: 12, color: colors.muted },
+  recBtn: { alignItems: "center", justifyContent: "center", gap: 2, paddingHorizontal: 10 },
+  recText: { fontSize: 10, color: colors.primary, fontWeight: "600" },
 });

@@ -54,6 +54,10 @@ const schema = z.object({
   BACKUP_DIR: z.string().default("/backups"),
   /** Fotos das câmeras tiradas pelo serviço motion (só leitura aqui). */
   SNAPSHOT_DIR: z.string().default("/snapshots"),
+  /** Push dos alarmes (Fase 9.3): serviço da Expo; vazio = exp.host. */
+  EXPO_PUSH_URL: z.string().default(""),
+  /** Token de acesso da conta Expo (só com a "segurança de push" ligada). */
+  EXPO_ACCESS_TOKEN: z.string().default(""),
 
   // ---- ao vivo (Fase 3)
   /** Validade do endereço temporário do ao vivo. A sessão e a permissão são reconferidas a cada acesso. */
