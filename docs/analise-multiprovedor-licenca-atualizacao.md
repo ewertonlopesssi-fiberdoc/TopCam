@@ -218,3 +218,41 @@ Lista de perfis criada e editada pela SuporTI e escolhida no cadastro do provedo
   - perfil, quantidade, vencimento;
   - **uso atual** (câmeras cadastradas / limite) e o valor estimado do período.
 - A cobrança (boleto, Pix, nota) fica fora do sistema; o menu só calcula e mostra.
+
+---
+
+## Migração futura para e-mail e senha (21/11/2026)
+
+O provedor instalado antes do servidor central passa para o login só com e-mail e senha **sem que o cliente final faça nada**. Para isso, a primeira instalação de provedor já sai com três cuidados:
+
+1. **O app neutro usa desde o início o nosso projeto Expo.** Os endereços de push dos celulares continuam valendo quando o relé entrar, sem novo registro.
+2. **Cada instalação recebe um identificador único** já na instalação, guardado no servidor. A chave do central é associada a ele depois.
+3. **E-mail único por usuário dentro de cada provedor** (já é assim). E-mail repetido em dois provedores: o app pergunta "qual provedor?".
+
+**Ordem da migração:**
+
+1. Central no ar: diretório e relé.
+2. Atualização das instalações:
+   - sincronização inicial dos e-mails (hash) e depois a cada alteração;
+   - push pelo relé;
+   - chave da instalação configurada via SSH.
+3. App com login só por e-mail e senha publicado. Quem já está logado continua; o QR continua como alternativa.
+4. **Por último**, quando todas as instalações estiverem usando o relé, ligar a "segurança de push" na conta Expo.
+
+## Servidor central na VM 107, migrado depois (decisão de 21/11/2026)
+
+O central (licenças, diretório de logins, relé de push e menu "Provedores") começa na VM 107. Ele vai para o servidor novo quando este estiver pronto, sem afetar os provedores, desde que:
+
+1. **Tenha endereço próprio, por nome e nunca por IP** (ex.: `central.suportinet.com.br`). Apps e instalações só conhecem o nome.
+2. **Seja um serviço separado na VM**, com banco e chaves próprios, sem se misturar com a plataforma da SuporTI.
+3. **As chaves sejam guardadas e levadas na migração**: assinatura das licenças, chaves das instalações e credencial de push. Com as mesmas chaves, nenhum provedor é reconfigurado.
+4. **O central entre no backup** (inclusive no destino externo).
+
+**Migração:**
+
+1. Reduzir o tempo de cache do DNS uns dias antes.
+2. Restaurar o backup no servidor novo e conferir.
+3. Apontar o nome para o servidor novo; o certificado HTTPS sai sozinho.
+4. Por alguns minutos, um primeiro acesso ou uma notificação podem atrasar. Quem está logado não percebe, e a licença tem carência, então nada é bloqueado.
+
+**Atenção:** com o central na VM 107, uma queda dela afeta a plataforma da SuporTI, o primeiro acesso e o push dos clientes dos provedores. O ao vivo e a gravação dos provedores continuam, porque rodam nos servidores deles. O central é leve: não passa vídeo.
