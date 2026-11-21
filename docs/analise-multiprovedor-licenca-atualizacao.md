@@ -157,3 +157,64 @@ Celular (app neutro)
 - opção "trocar de provedor" em Conta.
 
 O restante do app (telas, ao vivo, gravações, push) já funciona com qualquer servidor.
+
+---
+
+## App neutro sem servidor central (decisão de 21/11/2026)
+
+- **Agora:**
+  - primeiro acesso por **QR code ou endereço do servidor**;
+  - push **direto do servidor do provedor para a Expo** (com a "segurança de push" da conta Expo desligada);
+  - nenhum servidor central para manter.
+- **Depois, com o nosso servidor central:**
+  - **diretório de logins**, para o app entrar só com e-mail e senha. O central guarda só um hash do e-mail e o endereço do servidor; a senha nunca passa por ele;
+  - relé de push e licença automática;
+  - se o e-mail não for encontrado, o app oferece QR ou código.
+- Login tentado em todos os servidores está **descartado**: entregaria a senha do cliente a outros provedores.
+
+## Menu "Provedores" (só equipe SuporTI)
+
+| Seção | Conteúdo |
+|---|---|
+| Cadastro | Nome, código, CNPJ, contato, modelo (hospedado ou servidor próprio), endereço do servidor |
+| Marca | Logo, cores, contatos de suporte (app neutro, painel, e-mails) |
+| Licença | Perfil, quantidade, vencimento, situação (ativo, aviso, restrito, suspenso) com histórico |
+| Instalação | Versão, último contato, saúde, atualização disponível |
+| Acesso ao app | QR code e link de primeiro acesso; depois, o diretório de logins |
+| Notificações | Uso do relé de push |
+| App com a marca dele | Firebase, Expo, situação da publicação |
+
+**Etapas:**
+
+1. No nosso painel atual:
+   - para os provedores **hospedados**, os botões da licença bloqueiam de verdade;
+   - para os de **servidor próprio**, o menu registra a situação e mostra o comando para aplicarmos **via SSH**.
+2. Com o servidor central: a situação vai sozinha para as instalações; o diretório e o relé entram aqui.
+
+Aproveita a base do item 9 da lista ("marca do provedor").
+
+## Perfis de licença do provedor (decisão de 21/11/2026)
+
+Lista de perfis criada e editada pela SuporTI e escolhida no cadastro do provedor. É diferente dos **planos** que já existem (Básico, Pro, Enterprise), que limitam o **cliente final**.
+
+| Perfil | Cobrança | Limite |
+|---|---|---|
+| Ilimitado anual | Anual | Sem limite de câmeras |
+| Ilimitado mensal | Mensal | Sem limite de câmeras |
+| Por câmeras ("por tela") | Mensal ou anual | Quantidade fixa (ex.: licença de 100 câmeras) |
+| Por faixa | Mensal ou anual | A cada X câmeras (ex.: blocos de 50) |
+
+**Regras definidas pelo Ewe:**
+
+- **"Por tela" = limite de câmeras cadastradas.**
+  - A contagem é de **todas as câmeras cadastradas**, de todos os clientes do provedor, **transmitindo ou não**. Câmeras excluídas não contam.
+  - Ao chegar no limite, **o cadastro de novas câmeras é bloqueado**. Só volta a liberar quando o provedor passa para uma licença maior. Nada do que já existe para de funcionar.
+  - **Aviso antes do limite**, no painel do provedor e por e-mail. Sugestão a confirmar: em 80% e 90% e ao atingir.
+- O perfil guarda:
+  - nome, ciclo, modalidade e valores (base, por unidade ou por faixa);
+  - tamanho da faixa;
+  - prazos do bloqueio por falta de pagamento (aviso → restrito → suspenso).
+- O cadastro do provedor mostra:
+  - perfil, quantidade, vencimento;
+  - **uso atual** (câmeras cadastradas / limite) e o valor estimado do período.
+- A cobrança (boleto, Pix, nota) fica fora do sistema; o menu só calcula e mostra.

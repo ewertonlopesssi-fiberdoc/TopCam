@@ -193,6 +193,8 @@ Produção atualizada com a 9.2 e a 9.3 em 21/11/2026 (commit d4cddc6, migration
 
 **Depois, como atualizações:** integração SGP e os itens da lista (marca do provedor, áudio por câmera, melhorias de movimento, compartilhamento, IA de placa e rosto).
 
+**Depois das etapas acima, para atender outros provedores:** menu "Provedores" (só equipe SuporTI) com cadastro, marca, perfis de licença (ilimitado anual ou mensal, por câmeras com limite, por faixa), QR de acesso ao app e bloqueio (hospedado: direto; servidor próprio: via SSH no início).
+
 **Em análise (sem implementar):** instalação em servidor de outro provedor, app neutro e app com a marca do provedor, licença com bloqueio por falta de pagamento e atualizações com pouco impacto. Ver `analise-multiprovedor-licenca-atualizacao.md`.
 
 
